@@ -255,6 +255,7 @@ pub enum VtXMLElement {
 #[derive(PartialEq, Debug)]
 pub enum PicXMLElement {
     Pic,
+    CNvPr,
     Unsupported,
 }
 
@@ -537,6 +538,7 @@ impl FromStr for PicXMLElement {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
             "pic" => Ok(PicXMLElement::Pic),
+            "cNvPr" => Ok(PicXMLElement::CNvPr),
             _ => Ok(PicXMLElement::Unsupported),
         }
     }

@@ -11,6 +11,10 @@ use crate::xml_builder::*;
 #[serde(rename_all = "camelCase")]
 pub struct Pic {
     pub id: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub name: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub description: String,
     // For writer only
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub image: Vec<u8>,
@@ -70,6 +74,8 @@ impl Pic {
         let id = create_pic_rid(generate_pic_id());
         Self {
             id,
+            name: String::new(),
+            description: String::new(),
             image: buffer,
             size: (from_px(width_px), from_px(height_px)),
             position_type: DrawingPositionType::Inline,
@@ -94,6 +100,8 @@ impl Pic {
     pub(crate) fn with_empty() -> Pic {
         Self {
             id: "".to_string(),
+            name: String::new(),
+            description: String::new(),
             image: vec![],
             size: (0, 0),
             position_type: DrawingPositionType::Inline,
@@ -118,6 +126,24 @@ impl Pic {
     pub fn id(mut self, id: impl Into<String>) -> Pic {
         self.id = id.into();
         self
+    }
+
+    pub fn name(mut self, name: impl Into<String>) -> Pic {
+        self.name = name.into();
+        self
+    }
+
+    pub fn description(mut self, description: impl Into<String>) -> Pic {
+        self.description = description.into();
+        self
+    }
+
+    pub(crate) fn name_or_default(&self) -> &str {
+        if self.name.is_empty() {
+            "Figure"
+        } else {
+            &self.name
+        }
     }
 
     // unit is emu
@@ -211,7 +237,7 @@ impl BuildXML for Pic {
         XMLBuilder::from(stream)
             .open_pic("http://schemas.openxmlformats.org/drawingml/2006/picture")?
             .open_pic_nv_pic_pr()?
-            .pic_c_nv_pr("0", "")?
+            .pic_c_nv_pr("0", &self.name)?
             .open_pic_c_nv_pic_pr()?
             .a_pic_locks("1", "1")?
             .close()?
@@ -251,6 +277,18 @@ mod tests {
         assert_eq!(
             str::from_utf8(&b).unwrap(),
             r#"<pic:pic xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:nvPicPr><pic:cNvPr id="0" name="" /><pic:cNvPicPr><a:picLocks noChangeAspect="1" noChangeArrowheads="1" /></pic:cNvPicPr></pic:nvPicPr><pic:blipFill><a:blip r:embed="rIdImage123" /><a:srcRect /><a:stretch><a:fillRect /></a:stretch></pic:blipFill><pic:spPr bwMode="auto"><a:xfrm rot="0"><a:off x="0" y="0" /><a:ext cx="3048000" cy="2286000" /></a:xfrm><a:prstGeom prst="rect"><a:avLst /></a:prstGeom></pic:spPr></pic:pic>"#
+        );
+    }
+
+    #[test]
+    fn test_pic_build_with_name() {
+        let b = Pic::new_with_dimensions(Vec::new(), 320, 240)
+            .name("My Image")
+            .description("A test image")
+            .build();
+        assert_eq!(
+            str::from_utf8(&b).unwrap(),
+            r#"<pic:pic xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:nvPicPr><pic:cNvPr id="0" name="My Image" /><pic:cNvPicPr><a:picLocks noChangeAspect="1" noChangeArrowheads="1" /></pic:cNvPicPr></pic:nvPicPr><pic:blipFill><a:blip r:embed="rIdImage123" /><a:srcRect /><a:stretch><a:fillRect /></a:stretch></pic:blipFill><pic:spPr bwMode="auto"><a:xfrm rot="0"><a:off x="0" y="0" /><a:ext cx="3048000" cy="2286000" /></a:xfrm><a:prstGeom prst="rect"><a:avLst /></a:prstGeom></pic:spPr></pic:pic>"#
         );
     }
 }

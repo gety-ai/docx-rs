@@ -60,6 +60,13 @@ impl ElementReader for Pic {
                             _ => {}
                         }
                     }
+                    if let Ok(PicXMLElement::CNvPr) = PicXMLElement::from_str(&name.local_name) {
+                        if let Some(n) = read(&attributes, "name") {
+                            if pic.name.is_empty() {
+                                pic.name = n;
+                            }
+                        }
+                    }
                 }
                 Ok(XmlEvent::EndElement { name, .. }) => {
                     let e = PicXMLElement::from_str(&name.local_name).unwrap();
