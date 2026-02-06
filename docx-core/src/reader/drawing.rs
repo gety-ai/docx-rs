@@ -131,6 +131,7 @@ impl ElementReader for Drawing {
         let mut relative_from_h = RelativeFromHType::default();
         let mut relative_from_v = RelativeFromVType::default();
         let mut allow_overlap = true;
+        let mut doc_pr_id = String::new();
         let mut doc_pr_name = String::new();
         let mut doc_pr_descr = String::new();
         let mut dist_t = 0;
@@ -214,6 +215,9 @@ impl ElementReader for Drawing {
                                 }
                             }
                             WpXMLElement::DocProperty => {
+                                if let Some(id) = read(&attributes, "id") {
+                                    doc_pr_id = id;
+                                }
                                 if let Some(n) = read(&attributes, "name") {
                                     doc_pr_name = n;
                                 }
@@ -267,6 +271,7 @@ impl ElementReader for Drawing {
                             pic.relative_from_v = relative_from_v;
                             pic.position_v = DrawingPosition::Offset(position_v);
                             pic.position_h = DrawingPosition::Offset(position_h);
+                            pic.doc_pr_id = doc_pr_id.clone();
                             pic.name = doc_pr_name.clone();
                             pic.description = doc_pr_descr.clone();
                             drawing = drawing.pic(pic);

@@ -12,6 +12,8 @@ use crate::xml_builder::*;
 pub struct Pic {
     pub id: String,
     #[serde(skip_serializing_if = "String::is_empty")]
+    pub doc_pr_id: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
     pub name: String,
     #[serde(skip_serializing_if = "String::is_empty")]
     pub description: String,
@@ -74,6 +76,7 @@ impl Pic {
         let id = create_pic_rid(generate_pic_id());
         Self {
             id,
+            doc_pr_id: String::new(),
             name: String::new(),
             description: String::new(),
             image: buffer,
@@ -100,6 +103,7 @@ impl Pic {
     pub(crate) fn with_empty() -> Pic {
         Self {
             id: "".to_string(),
+            doc_pr_id: String::new(),
             name: String::new(),
             description: String::new(),
             image: vec![],
@@ -135,6 +139,11 @@ impl Pic {
 
     pub fn description(mut self, description: impl Into<String>) -> Pic {
         self.description = description.into();
+        self
+    }
+
+    pub fn doc_pr_id(mut self, id: impl Into<String>) -> Pic {
+        self.doc_pr_id = id.into();
         self
     }
 

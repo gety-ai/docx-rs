@@ -128,8 +128,9 @@ impl BuildXML for Drawing {
                 } else if p.position_type == DrawingPositionType::Anchor {
                     b = b.wrap_square("bothSides")?;
                 }
+                let doc_pr_id_str = if p.doc_pr_id.is_empty() { "1" } else { &p.doc_pr_id };
                 b = b
-                    .wp_doc_pr("1", p.name_or_default(), &p.description)?
+                    .wp_doc_pr(doc_pr_id_str, p.name_or_default(), &p.description)?
                     .open_wp_c_nv_graphic_frame_pr()?
                     .a_graphic_frame_locks(
                         "http://schemas.openxmlformats.org/drawingml/2006/main",
