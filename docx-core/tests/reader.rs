@@ -4,12 +4,40 @@ use docx_rs::*;
 use std::fs::*;
 use std::io::{Read, Write};
 
+fn normalize_para_ids(json: &str) -> String {
+    fn normalize_line(line: &str) -> String {
+        const KEYS: [&str; 3] = ["\"id\": \"", "\"paragraphId\": \"", "\"parentParagraphId\": \""];
+
+        for key in KEYS {
+            if let Some(pos) = line.find(key) {
+                let start = pos + key.len();
+                if line.len() >= start + 8 {
+                    let candidate = &line[start..start + 8];
+                    if candidate.chars().all(|c| c.is_ascii_hexdigit()) {
+                        let mut out = String::with_capacity(line.len());
+                        out.push_str(&line[..start]);
+                        out.push_str("00000000");
+                        out.push_str(&line[start + 8..]);
+                        return out;
+                    }
+                }
+            }
+        }
+        line.to_owned()
+    }
+
+    json.lines()
+        .map(normalize_line)
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 #[test]
 pub fn read_hello() {
     let mut file = File::open("../fixtures/hello_world/hello_world.docx").unwrap();
     let mut buf = vec![];
     file.read_to_end(&mut buf).unwrap();
-    let json = read_docx(&buf).unwrap().json();
+    let json = normalize_para_ids(&read_docx(&buf).unwrap().json());
 
     assert_debug_snapshot!("read_hello", &json);
 
@@ -24,7 +52,7 @@ pub fn read_numbering() {
     let mut file = File::open("../fixtures/numbering/numbering.docx").unwrap();
     let mut buf = vec![];
     file.read_to_end(&mut buf).unwrap();
-    let json = read_docx(&buf).unwrap().json();
+    let json = normalize_para_ids(&read_docx(&buf).unwrap().json());
 
     assert_debug_snapshot!("read_numbering", &json);
 
@@ -39,7 +67,7 @@ pub fn read_decoration() {
     let mut file = File::open("../fixtures/decoration/decoration.docx").unwrap();
     let mut buf = vec![];
     file.read_to_end(&mut buf).unwrap();
-    let json = read_docx(&buf).unwrap().json();
+    let json = normalize_para_ids(&read_docx(&buf).unwrap().json());
 
     assert_debug_snapshot!("read_decoration", &json);
 
@@ -55,7 +83,7 @@ pub fn read_highlight_and_underline() {
         File::open("../fixtures/highlight_and_underline/highlight_and_underline.docx").unwrap();
     let mut buf = vec![];
     file.read_to_end(&mut buf).unwrap();
-    let json = read_docx(&buf).unwrap().json();
+    let json = normalize_para_ids(&read_docx(&buf).unwrap().json());
 
     assert_debug_snapshot!("read_highlight_and_underline", &json);
 
@@ -70,7 +98,7 @@ pub fn read_history() {
     let mut file = File::open("../fixtures/history_libre_office/history.docx").unwrap();
     let mut buf = vec![];
     file.read_to_end(&mut buf).unwrap();
-    let json = read_docx(&buf).unwrap().json();
+    let json = normalize_para_ids(&read_docx(&buf).unwrap().json());
 
     assert_debug_snapshot!("read_history", &json);
 
@@ -85,7 +113,7 @@ pub fn read_indent_word_online() {
     let mut file = File::open("../fixtures/indent_word_online/indent.docx").unwrap();
     let mut buf = vec![];
     file.read_to_end(&mut buf).unwrap();
-    let json = read_docx(&buf).unwrap().json();
+    let json = normalize_para_ids(&read_docx(&buf).unwrap().json());
 
     assert_debug_snapshot!("read_indent_word_online", &json);
 
@@ -100,7 +128,7 @@ pub fn read_tab_and_break() {
     let mut file = File::open("../fixtures/tab_and_break/tab_and_break.docx").unwrap();
     let mut buf = vec![];
     file.read_to_end(&mut buf).unwrap();
-    let json = read_docx(&buf).unwrap().json();
+    let json = normalize_para_ids(&read_docx(&buf).unwrap().json());
 
     assert_debug_snapshot!("read_tab_and_break", &json);
 
@@ -115,7 +143,7 @@ pub fn read_table_docx() {
     let mut file = File::open("../fixtures/table_docx/table.docx").unwrap();
     let mut buf = vec![];
     file.read_to_end(&mut buf).unwrap();
-    let json = read_docx(&buf).unwrap().json();
+    let json = normalize_para_ids(&read_docx(&buf).unwrap().json());
 
     assert_debug_snapshot!("read_table_docx", &json);
 
@@ -130,7 +158,7 @@ pub fn read_table_merged_libre_office() {
     let mut file = File::open("../fixtures/table_merged_libre_office/table_merged.docx").unwrap();
     let mut buf = vec![];
     file.read_to_end(&mut buf).unwrap();
-    let json = read_docx(&buf).unwrap().json();
+    let json = normalize_para_ids(&read_docx(&buf).unwrap().json());
 
     assert_debug_snapshot!("read_table_merged_libre_office", &json);
 
@@ -145,7 +173,7 @@ pub fn read_bom() {
     let mut file = File::open("../fixtures/bom/bom.docx").unwrap();
     let mut buf = vec![];
     file.read_to_end(&mut buf).unwrap();
-    let json = read_docx(&buf).unwrap().json();
+    let json = normalize_para_ids(&read_docx(&buf).unwrap().json());
 
     assert_debug_snapshot!("read_bom", &json);
 
@@ -160,7 +188,7 @@ pub fn read_bookmark() {
     let mut file = File::open("../fixtures/bookmark/bookmark.docx").unwrap();
     let mut buf = vec![];
     file.read_to_end(&mut buf).unwrap();
-    let json = read_docx(&buf).unwrap().json();
+    let json = normalize_para_ids(&read_docx(&buf).unwrap().json());
 
     assert_debug_snapshot!("read_bookmark", &json);
 
@@ -175,7 +203,7 @@ pub fn read_insert_table() {
     let mut file = File::open("../fixtures/insert_table/insert_table.docx").unwrap();
     let mut buf = vec![];
     file.read_to_end(&mut buf).unwrap();
-    let json = read_docx(&buf).unwrap().json();
+    let json = normalize_para_ids(&read_docx(&buf).unwrap().json());
 
     assert_debug_snapshot!("read_insert_table", &json);
 
@@ -190,7 +218,7 @@ pub fn read_textbox() {
     let mut file = File::open("../fixtures/textbox/textbox.docx").unwrap();
     let mut buf = vec![];
     file.read_to_end(&mut buf).unwrap();
-    let json = read_docx(&buf).unwrap().json();
+    let json = normalize_para_ids(&read_docx(&buf).unwrap().json());
 
     assert_debug_snapshot!("read_textbox", &json);
 
@@ -205,7 +233,7 @@ pub fn read_from_doc() {
     let mut file = File::open("../fixtures/from_doc/from_doc.docx").unwrap();
     let mut buf = vec![];
     file.read_to_end(&mut buf).unwrap();
-    let json = read_docx(&buf).unwrap().json();
+    let json = normalize_para_ids(&read_docx(&buf).unwrap().json());
 
     assert_debug_snapshot!("read_from_doc", &json);
 
@@ -220,7 +248,7 @@ pub fn read_lvl_override() {
     let mut file = File::open("../fixtures/lvl_override/override.docx").unwrap();
     let mut buf = vec![];
     file.read_to_end(&mut buf).unwrap();
-    let json = read_docx(&buf).unwrap().json();
+    let json = normalize_para_ids(&read_docx(&buf).unwrap().json());
 
     assert_debug_snapshot!("read_lvl_override", &json);
 
@@ -235,7 +263,7 @@ pub fn read_comment() {
     let mut file = File::open("../fixtures/comment/comment.docx").unwrap();
     let mut buf = vec![];
     file.read_to_end(&mut buf).unwrap();
-    let json = read_docx(&buf).unwrap().json();
+    let json = normalize_para_ids(&read_docx(&buf).unwrap().json());
 
     assert_debug_snapshot!("read_comment", &json);
 
@@ -250,7 +278,7 @@ pub fn read_extended_comment() {
     let mut file = File::open("../fixtures/extended_comments/extended_comments.docx").unwrap();
     let mut buf = vec![];
     file.read_to_end(&mut buf).unwrap();
-    let json = read_docx(&buf).unwrap().json();
+    let json = normalize_para_ids(&read_docx(&buf).unwrap().json());
 
     assert_debug_snapshot!("read_extended_comments", &json);
 
@@ -267,7 +295,7 @@ pub fn read_comment_in_delete_in_insert() {
             .unwrap();
     let mut buf = vec![];
     file.read_to_end(&mut buf).unwrap();
-    let json = read_docx(&buf).unwrap().json();
+    let json = normalize_para_ids(&read_docx(&buf).unwrap().json());
 
     assert_debug_snapshot!("read_comment_in_delete_in_insert", &json);
 
@@ -282,7 +310,7 @@ pub fn read_line_spacing() {
     let mut file = File::open("../fixtures/line_spacing/line_spacing.docx").unwrap();
     let mut buf = vec![];
     file.read_to_end(&mut buf).unwrap();
-    let json = read_docx(&buf).unwrap().json();
+    let json = normalize_para_ids(&read_docx(&buf).unwrap().json());
 
     assert_debug_snapshot!("line_spacing", &json);
 
@@ -297,7 +325,7 @@ pub fn read_footnotes() {
     let mut file = File::open("../fixtures/footnotes/footnotes.docx").unwrap();
     let mut buf = vec![];
     file.read_to_end(&mut buf).unwrap();
-    let json = read_docx(&buf).unwrap().json();
+    let json = normalize_para_ids(&read_docx(&buf).unwrap().json());
 
     assert_debug_snapshot!("read_footnotes", &json);
 
