@@ -1,17 +1,255 @@
 use super::*;
+use serde::de::IgnoredAny;
 use serde::ser::{SerializeStruct, Serializer};
-use serde::Serialize;
+use serde::{Deserialize, Deserializer, Serialize};
 use std::io::Write;
+use std::str::FromStr;
 
 use crate::documents::BuildXML;
+use crate::escape::replace_escaped;
 use crate::types::*;
 use crate::xml_builder::*;
+
+use super::style::{parse_run_property_xml, RunPropertyXml};
+
+// ============================================================================
+// XML Deserialization Helper Structures (for quick-xml serde)
+// ============================================================================
+
+#[derive(Debug, Deserialize, Default)]
+struct RunXml {
+    #[serde(rename = "rPr", alias = "w:rPr", default)]
+    run_property: Option<RunPropertyXml>,
+    #[serde(rename = "$value", default)]
+    children: Vec<RunChildXml>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+struct XmlTextNode {
+    #[serde(rename = "$text", default)]
+    text: String,
+}
+
+#[derive(Debug, Deserialize, Default)]
+struct XmlBreakNode {
+    #[serde(rename = "@type", alias = "@w:type", default)]
+    break_type: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+struct XmlPositionalTabNode {
+    #[serde(rename = "@alignment", alias = "@w:alignment", default)]
+    alignment: Option<String>,
+    #[serde(rename = "@relativeTo", alias = "@w:relativeTo", default)]
+    relative_to: Option<String>,
+    #[serde(rename = "@leader", alias = "@w:leader", default)]
+    leader: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+struct XmlSymNode {
+    #[serde(rename = "@font", alias = "@w:font", default)]
+    font: Option<String>,
+    #[serde(rename = "@char", alias = "@w:char", default)]
+    char_code: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+struct XmlFieldCharNode {
+    #[serde(rename = "@fldCharType", alias = "@w:fldCharType", default)]
+    field_char_type: Option<String>,
+    #[serde(rename = "@dirty", alias = "@w:dirty", default)]
+    dirty: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+struct XmlFootnoteReferenceNode {
+    #[serde(rename = "@id", alias = "@w:id", default)]
+    id: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+struct XmlShadingNode {
+    #[serde(rename = "@val", alias = "@w:val", default)]
+    shd_type: Option<String>,
+    #[serde(rename = "@color", alias = "@w:color", default)]
+    color: Option<String>,
+    #[serde(rename = "@fill", alias = "@w:fill", default)]
+    fill: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+enum RunChildXml {
+    #[serde(rename = "t", alias = "w:t")]
+    Text(XmlTextNode),
+    #[serde(rename = "sym", alias = "w:sym")]
+    Sym(XmlSymNode),
+    #[serde(rename = "delText", alias = "w:delText")]
+    DeleteText(XmlTextNode),
+    #[serde(rename = "tab", alias = "w:tab")]
+    Tab(IgnoredAny),
+    #[serde(rename = "ptab", alias = "w:ptab")]
+    PTab(XmlPositionalTabNode),
+    #[serde(rename = "br", alias = "w:br")]
+    Break(XmlBreakNode),
+    #[serde(rename = "drawing", alias = "w:drawing")]
+    Drawing(IgnoredAny),
+    #[serde(rename = "pict", alias = "w:pict")]
+    Pict(IgnoredAny),
+    #[serde(rename = "shape", alias = "v:shape", alias = "w:shape")]
+    Shape(IgnoredAny),
+    #[serde(rename = "fldChar", alias = "w:fldChar")]
+    FieldChar(XmlFieldCharNode),
+    #[serde(rename = "instrText", alias = "w:instrText")]
+    InstrText(XmlTextNode),
+    #[serde(rename = "delInstrText", alias = "w:delInstrText")]
+    DeleteInstrText(XmlTextNode),
+    #[serde(rename = "footnoteReference", alias = "w:footnoteReference")]
+    FootnoteReference(XmlFootnoteReferenceNode),
+    #[serde(rename = "shd", alias = "w:shd")]
+    Shading(XmlShadingNode),
+    #[serde(rename = "rPr", alias = "w:rPr")]
+    RunProperty(IgnoredAny), // Already handled separately in RunXml
+    #[serde(other)]
+    Unknown,
+}
+
+fn parse_on_off_run(v: &str) -> bool {
+    !matches!(v.trim().to_ascii_lowercase().as_str(), "0" | "false")
+}
+
+fn run_child_from_xml(xml: RunChildXml) -> Option<RunChild> {
+    match xml {
+        RunChildXml::Text(node) => Some(RunChild::Text(Text::without_escape(replace_escaped(
+            &node.text,
+        )))),
+        RunChildXml::Sym(node) => {
+            // Skip malformed sym instead of creating invalid values
+            if let (Some(font), Some(char_code)) = (node.font, node.char_code) {
+                Some(RunChild::Sym(Sym::new(font, char_code)))
+            } else {
+                None
+            }
+        }
+        RunChildXml::DeleteText(node) => Some(RunChild::DeleteText(DeleteText::without_escape(
+            replace_escaped(&node.text),
+        ))),
+        RunChildXml::Tab(_) => Some(RunChild::Tab(Tab::new())),
+        RunChildXml::PTab(node) => {
+            let alignment = node
+                .alignment
+                .as_deref()
+                .and_then(|v| PositionalTabAlignmentType::from_str(v).ok())
+                .unwrap_or(PositionalTabAlignmentType::Left);
+            let relative_to = node
+                .relative_to
+                .as_deref()
+                .and_then(|v| PositionalTabRelativeTo::from_str(v).ok())
+                .unwrap_or(PositionalTabRelativeTo::Margin);
+            let leader = node
+                .leader
+                .as_deref()
+                .and_then(|v| TabLeaderType::from_str(v).ok())
+                .unwrap_or(TabLeaderType::None);
+            Some(RunChild::PTab(PositionalTab::new(
+                alignment,
+                relative_to,
+                leader,
+            )))
+        }
+        RunChildXml::Break(node) => {
+            let break_type = node
+                .break_type
+                .as_deref()
+                .and_then(|v| BreakType::from_str(v).ok())
+                .unwrap_or(BreakType::TextWrapping);
+            Some(RunChild::Break(Break::new(break_type)))
+        }
+        RunChildXml::Drawing(_) | RunChildXml::Pict(_) => {
+            // Drawing/Pict are complex - skip for now (parsed separately via ElementReader)
+            None
+        }
+        RunChildXml::Shape(_) => {
+            // Shape is complex - skip for now
+            None
+        }
+        RunChildXml::FieldChar(node) => {
+            let t = node
+                .field_char_type
+                .as_deref()
+                .and_then(|v| FieldCharType::from_str(v).ok())
+                .unwrap_or(FieldCharType::Unsupported);
+            let mut f = FieldChar::new(t);
+            if node
+                .dirty
+                .as_deref()
+                .map(parse_on_off_run)
+                .unwrap_or(false)
+            {
+                f = f.dirty();
+            }
+            Some(RunChild::FieldChar(f))
+        }
+        RunChildXml::InstrText(node) => {
+            let text = replace_escaped(&node.text);
+            if text.trim().is_empty() {
+                None
+            } else {
+                Some(RunChild::InstrTextString(text))
+            }
+        }
+        RunChildXml::DeleteInstrText(node) => Some(RunChild::DeleteInstrText(Box::new(
+            DeleteInstrText::Unsupported(replace_escaped(&node.text)),
+        ))),
+        RunChildXml::FootnoteReference(node) => {
+            // Skip if id is missing or invalid instead of defaulting to 0
+            node.id
+                .and_then(|v| v.parse::<usize>().ok())
+                .map(|id| RunChild::FootnoteReference(FootnoteReference::new(id)))
+        }
+        RunChildXml::Shading(node) => {
+            let mut shd = Shading::new();
+            if let Some(v) = node.shd_type {
+                if let Ok(t) = ShdType::from_str(&v) {
+                    shd = shd.shd_type(t);
+                }
+            }
+            if let Some(v) = node.color {
+                shd = shd.color(v);
+            }
+            if let Some(v) = node.fill {
+                shd = shd.fill(v);
+            }
+            Some(RunChild::Shading(shd))
+        }
+        RunChildXml::RunProperty(_) | RunChildXml::Unknown => None,
+    }
+}
 
 #[derive(Serialize, Debug, Clone, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Run {
     pub run_property: RunProperty,
     pub children: Vec<RunChild>,
+}
+
+impl<'de> Deserialize<'de> for Run {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let xml = RunXml::deserialize(deserializer)?;
+        let children: Vec<RunChild> = xml
+            .children
+            .into_iter()
+            .filter_map(run_child_from_xml)
+            .collect();
+
+        Ok(Run {
+            run_property: parse_run_property_xml(xml.run_property),
+            children,
+        })
+    }
 }
 
 impl Default for Run {
@@ -478,5 +716,63 @@ mod tests {
             serde_json::to_string(&c).unwrap(),
             r#"{"type":"shading","data":{"shdType":"clear","color":"auto","fill":"FFFFFF"}}"#
         );
+    }
+
+    // XML Deserialization tests (quick-xml serde)
+    #[test]
+    fn test_run_xml_deserialize_text() {
+        let xml = r#"<w:r xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+            <w:rPr><w:sz w:val="24"/></w:rPr>
+            <w:t>Hello World</w:t>
+        </w:r>"#;
+        let run: Run = quick_xml::de::from_str(xml).unwrap();
+        assert_eq!(run.children.len(), 1);
+        assert!(matches!(&run.children[0], RunChild::Text(t) if t.text == "Hello World"));
+        assert_eq!(run.run_property.sz, Some(Sz::new(24)));
+    }
+
+    #[test]
+    fn test_run_xml_deserialize_tab_break() {
+        let xml = r#"<w:r xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+            <w:tab/>
+            <w:br w:type="page"/>
+        </w:r>"#;
+        let run: Run = quick_xml::de::from_str(xml).unwrap();
+        assert_eq!(run.children.len(), 2);
+        assert!(matches!(&run.children[0], RunChild::Tab(_)));
+        assert!(matches!(&run.children[1], RunChild::Break(b) if *b == Break::new(BreakType::Page)));
+    }
+
+    #[test]
+    fn test_run_xml_deserialize_bold_italic() {
+        let xml = r#"<w:r xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+            <w:rPr>
+                <w:b/>
+                <w:i/>
+                <w:color w:val="FF0000"/>
+            </w:rPr>
+            <w:t>Styled</w:t>
+        </w:r>"#;
+        let run: Run = quick_xml::de::from_str(xml).unwrap();
+        assert!(run.run_property.bold.is_some());
+        assert!(run.run_property.italic.is_some());
+        assert_eq!(
+            run.run_property.color,
+            Some(Color::new("FF0000"))
+        );
+    }
+
+    #[test]
+    fn test_run_xml_deserialize_field_char() {
+        let xml = r#"<w:r xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+            <w:fldChar w:fldCharType="begin"/>
+            <w:instrText>PAGE</w:instrText>
+            <w:fldChar w:fldCharType="end"/>
+        </w:r>"#;
+        let run: Run = quick_xml::de::from_str(xml).unwrap();
+        assert_eq!(run.children.len(), 3);
+        assert!(matches!(&run.children[0], RunChild::FieldChar(f) if f.field_char_type == FieldCharType::Begin));
+        assert!(matches!(&run.children[1], RunChild::InstrTextString(s) if s == "PAGE"));
+        assert!(matches!(&run.children[2], RunChild::FieldChar(f) if f.field_char_type == FieldCharType::End));
     }
 }

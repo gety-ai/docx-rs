@@ -1,11 +1,137 @@
+use serde::de::IgnoredAny;
 use serde::ser::{SerializeStruct, Serializer};
-use serde::Serialize;
+use serde::{Deserialize, Deserializer, Serialize};
 use std::io::Write;
 
 use super::*;
+use super::style::{
+    parse_paragraph_property_xml, ParagraphPropertyXml as StyleParagraphPropertyXml, XmlValueAttr,
+};
 use crate::documents::BuildXML;
 use crate::types::*;
 use crate::xml_builder::*;
+
+// ============================================================================
+// XML Deserialization Helper Structures (for quick-xml serde)
+// ============================================================================
+
+#[derive(Debug, Deserialize, Default)]
+struct NumberingPropertyXml {
+    #[serde(rename = "numId", alias = "w:numId", default)]
+    num_id: Option<XmlValueAttr>,
+    #[serde(rename = "ilvl", alias = "w:ilvl", default)]
+    ilvl: Option<XmlValueAttr>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+struct ParagraphPropertyWithNumPrXml {
+    #[serde(flatten)]
+    base: StyleParagraphPropertyXml,
+    #[serde(rename = "numPr", alias = "w:numPr", default)]
+    num_pr: Option<NumberingPropertyXml>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+struct ParagraphXml {
+    #[serde(
+        rename = "@paraId",
+        alias = "@w:paraId",
+        alias = "@w14:paraId",
+        default
+    )]
+    id: Option<String>,
+    #[serde(rename = "pPr", alias = "w:pPr", default)]
+    property: Option<ParagraphPropertyWithNumPrXml>,
+    #[serde(rename = "$value", default)]
+    children: Vec<ParagraphChildXml>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+struct XmlBookmarkStartNode {
+    #[serde(rename = "@id", alias = "@w:id", default)]
+    id: Option<String>,
+    #[serde(rename = "@name", alias = "@w:name", default)]
+    name: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+struct XmlIdNode {
+    #[serde(rename = "@id", alias = "@w:id", default)]
+    id: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+enum ParagraphChildXml {
+    #[serde(rename = "r", alias = "w:r")]
+    Run(Run),
+    #[serde(rename = "bookmarkStart", alias = "w:bookmarkStart")]
+    BookmarkStart(XmlBookmarkStartNode),
+    #[serde(rename = "bookmarkEnd", alias = "w:bookmarkEnd")]
+    BookmarkEnd(XmlIdNode),
+    #[serde(rename = "commentRangeStart", alias = "w:commentRangeStart")]
+    CommentStart(XmlIdNode),
+    #[serde(rename = "commentRangeEnd", alias = "w:commentRangeEnd")]
+    CommentEnd(XmlIdNode),
+    #[serde(rename = "ins", alias = "w:ins")]
+    Insert(IgnoredAny),
+    #[serde(rename = "del", alias = "w:del")]
+    Delete(IgnoredAny),
+    #[serde(rename = "hyperlink", alias = "w:hyperlink")]
+    Hyperlink(IgnoredAny),
+    #[serde(rename = "sdt", alias = "w:sdt")]
+    StructuredDataTag(IgnoredAny),
+    #[serde(rename = "pPr", alias = "w:pPr")]
+    ParagraphProperty(IgnoredAny), // Already handled separately
+    #[serde(other)]
+    Unknown,
+}
+
+fn parse_optional_usize(v: Option<String>) -> Option<usize> {
+    v.and_then(|s| s.parse::<usize>().ok())
+}
+
+fn parse_numbering_property_xml(xml: Option<NumberingPropertyXml>) -> Option<NumberingProperty> {
+    let xml = xml?;
+    let mut np = NumberingProperty::new();
+    if let Some(id) = parse_optional_usize(xml.num_id.and_then(|v| v.val)) {
+        np = np.id(NumberingId::new(id));
+    }
+    if let Some(level) = parse_optional_usize(xml.ilvl.and_then(|v| v.val)) {
+        np = np.level(IndentLevel::new(level));
+    }
+    Some(np)
+}
+
+fn paragraph_child_from_xml(xml: ParagraphChildXml) -> Option<ParagraphChild> {
+    match xml {
+        ParagraphChildXml::Run(run) => Some(ParagraphChild::Run(Box::new(run))),
+        ParagraphChildXml::BookmarkStart(node) => {
+            let id = parse_optional_usize(node.id)?;
+            let name = node.name?;
+            Some(ParagraphChild::BookmarkStart(BookmarkStart::new(id, name)))
+        }
+        ParagraphChildXml::BookmarkEnd(node) => {
+            let id = parse_optional_usize(node.id)?;
+            Some(ParagraphChild::BookmarkEnd(BookmarkEnd::new(id)))
+        }
+        ParagraphChildXml::CommentStart(node) => {
+            let id = parse_optional_usize(node.id)?;
+            Some(ParagraphChild::CommentStart(Box::new(
+                CommentRangeStart::new(Comment::new(id)),
+            )))
+        }
+        ParagraphChildXml::CommentEnd(node) => {
+            let id = parse_optional_usize(node.id)?;
+            Some(ParagraphChild::CommentEnd(CommentRangeEnd::new(id)))
+        }
+        ParagraphChildXml::Insert(_)
+        | ParagraphChildXml::Delete(_)
+        | ParagraphChildXml::Hyperlink(_)
+        | ParagraphChildXml::StructuredDataTag(_)
+        | ParagraphChildXml::ParagraphProperty(_)
+        | ParagraphChildXml::Unknown => None,
+    }
+}
 
 #[derive(Serialize, Debug, Clone, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -14,6 +140,39 @@ pub struct Paragraph {
     pub children: Vec<ParagraphChild>,
     pub property: ParagraphProperty,
     pub has_numbering: bool,
+}
+
+impl<'de> Deserialize<'de> for Paragraph {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let xml = ParagraphXml::deserialize(deserializer)?;
+        let mut property = ParagraphProperty::new();
+        let mut has_numbering = false;
+
+        if let Some(ppr) = xml.property {
+            property = parse_paragraph_property_xml(Some(ppr.base));
+            if let Some(np) = parse_numbering_property_xml(ppr.num_pr) {
+                property = property.numbering_property(np);
+                has_numbering = true;
+            }
+        }
+
+        let children = xml
+            .children
+            .into_iter()
+            .filter_map(paragraph_child_from_xml)
+            .collect();
+
+        let id = xml.id.unwrap_or_else(crate::generate_para_id);
+        Ok(Paragraph {
+            id,
+            children,
+            property,
+            has_numbering,
+        })
+    }
 }
 
 impl Default for Paragraph {
@@ -619,5 +778,45 @@ mod tests {
             .add_delete(Delete::new().add_run(Run::new().add_delete_text("!!!!!")))
             .raw_text();
         assert_eq!(b, "HelloWorld".to_owned());
+    }
+
+    // XML Deserialization tests (quick-xml serde)
+    #[test]
+    fn test_paragraph_xml_deserialize_numbering() {
+        let xml = r#"<w:p xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:w14="http://schemas.microsoft.com/office/word/2010/wordml" w14:paraId="A1B2C3D4">
+            <w:pPr>
+                <w:numPr>
+                    <w:ilvl w:val="0"/>
+                    <w:numId w:val="1"/>
+                </w:numPr>
+            </w:pPr>
+            <w:r><w:t>hello</w:t></w:r>
+        </w:p>"#;
+
+        let p: Paragraph = quick_xml::de::from_str(xml).unwrap();
+        assert_eq!(p.id, "A1B2C3D4");
+        assert!(p.has_numbering);
+        assert!(p.property.numbering_property.is_some());
+        assert_eq!(p.children.len(), 1);
+        assert!(matches!(&p.children[0], ParagraphChild::Run(_)));
+    }
+
+    #[test]
+    fn test_paragraph_xml_deserialize_bookmark_and_comment() {
+        let xml = r#"<w:p xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+            <w:bookmarkStart w:id="3" w:name="bm"/>
+            <w:r><w:t>x</w:t></w:r>
+            <w:commentRangeStart w:id="5"/>
+            <w:commentRangeEnd w:id="5"/>
+            <w:bookmarkEnd w:id="3"/>
+        </w:p>"#;
+
+        let p: Paragraph = quick_xml::de::from_str(xml).unwrap();
+        assert_eq!(p.children.len(), 5);
+        assert!(matches!(&p.children[0], ParagraphChild::BookmarkStart(_)));
+        assert!(matches!(&p.children[1], ParagraphChild::Run(_)));
+        assert!(matches!(&p.children[2], ParagraphChild::CommentStart(_)));
+        assert!(matches!(&p.children[3], ParagraphChild::CommentEnd(_)));
+        assert!(matches!(&p.children[4], ParagraphChild::BookmarkEnd(_)));
     }
 }
