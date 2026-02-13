@@ -1,4 +1,5 @@
-use std::io::Read;
+use quick_xml::de::from_reader;
+use std::io::{BufReader, Read};
 
 use xml::attribute::OwnedAttribute;
 use xml::reader::EventReader;
@@ -21,5 +22,11 @@ impl ElementReader for CommentExtended {
             comment_extended = comment_extended.parent_paragraph_id(parent_id);
         }
         Ok(comment_extended)
+    }
+}
+
+impl FromXMLQuickXml for CommentExtended {
+    fn from_xml_quick<R: Read>(reader: R) -> Result<Self, ReaderError> {
+        Ok(from_reader(BufReader::new(reader))?)
     }
 }

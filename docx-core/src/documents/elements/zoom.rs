@@ -2,11 +2,32 @@ use crate::documents::BuildXML;
 use crate::xml_builder::*;
 use std::io::Write;
 
-use serde::{Serialize, Serializer};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Zoom {
     val: usize,
+}
+
+// XML deserialization helper
+#[derive(Deserialize)]
+struct ZoomXml {
+    #[serde(rename = "@val", alias = "@w:val", alias = "@percent", alias = "@w:percent", default)]
+    val: Option<String>,
+}
+
+impl<'de> Deserialize<'de> for Zoom {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let xml = ZoomXml::deserialize(deserializer)?;
+        let val = xml
+            .val
+            .and_then(|v| v.parse::<usize>().ok())
+            .unwrap_or(100);
+        Ok(Zoom { val })
+    }
 }
 
 impl Zoom {

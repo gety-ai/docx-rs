@@ -1,5 +1,6 @@
-use serde::Serialize;
+use serde::{Deserialize, Deserializer, Serialize};
 use std::io::Write;
+use std::str::FromStr;
 
 use crate::documents::BuildXML;
 use crate::escape::escape;
@@ -8,6 +9,436 @@ use crate::xml_builder::*;
 use crate::StyleType;
 
 use super::*;
+
+// ============================================================================
+// XML Deserialization Helper Structures (for quick-xml serde)
+// ============================================================================
+
+#[derive(Debug, Deserialize, Default, Clone)]
+pub(crate) struct XmlValueAttr {
+    #[serde(rename = "@val", alias = "@w:val", default)]
+    pub val: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Default, Clone)]
+pub(crate) struct XmlOnOffAttr {
+    #[serde(rename = "@val", alias = "@w:val", default)]
+    pub val: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Default, Clone)]
+pub(crate) struct RunFontsXml {
+    #[serde(rename = "@ascii", alias = "@w:ascii", default)]
+    pub ascii: Option<String>,
+    #[serde(rename = "@eastAsia", alias = "@w:eastAsia", default)]
+    pub east_asia: Option<String>,
+    #[serde(rename = "@hAnsi", alias = "@w:hAnsi", default)]
+    pub h_ansi: Option<String>,
+    #[serde(rename = "@cs", alias = "@w:cs", default)]
+    pub cs: Option<String>,
+    #[serde(rename = "@asciiTheme", alias = "@w:asciiTheme", default)]
+    pub ascii_theme: Option<String>,
+    #[serde(rename = "@eastAsiaTheme", alias = "@w:eastAsiaTheme", default)]
+    pub east_asia_theme: Option<String>,
+    #[serde(rename = "@hAnsiTheme", alias = "@w:hAnsiTheme", default)]
+    pub h_ansi_theme: Option<String>,
+    #[serde(rename = "@cstheme", alias = "@w:cstheme", default)]
+    pub cs_theme: Option<String>,
+    #[serde(rename = "@hint", alias = "@w:hint", default)]
+    pub hint: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Default, Clone)]
+pub(crate) struct RunPropertyXml {
+    #[serde(rename = "rStyle", alias = "w:rStyle", default)]
+    pub style: Option<XmlValueAttr>,
+    #[serde(rename = "sz", alias = "w:sz", default)]
+    pub size: Option<XmlValueAttr>,
+    #[serde(rename = "color", alias = "w:color", default)]
+    pub color: Option<XmlValueAttr>,
+    #[serde(rename = "highlight", alias = "w:highlight", default)]
+    pub highlight: Option<XmlValueAttr>,
+    #[serde(rename = "spacing", alias = "w:spacing", default)]
+    pub spacing: Option<XmlValueAttr>,
+    #[serde(rename = "rFonts", alias = "w:rFonts", default)]
+    pub fonts: Option<RunFontsXml>,
+    #[serde(rename = "u", alias = "w:u", default)]
+    pub underline: Option<XmlValueAttr>,
+    #[serde(rename = "b", alias = "w:b", default)]
+    pub bold: Option<XmlOnOffAttr>,
+    #[serde(rename = "i", alias = "w:i", default)]
+    pub italic: Option<XmlOnOffAttr>,
+    #[serde(rename = "strike", alias = "w:strike", default)]
+    pub strike: Option<XmlOnOffAttr>,
+    #[serde(rename = "dstrike", alias = "w:dstrike", default)]
+    pub dstrike: Option<XmlOnOffAttr>,
+    #[serde(rename = "vanish", alias = "w:vanish", default)]
+    pub vanish: Option<XmlOnOffAttr>,
+    #[serde(rename = "specVanish", alias = "w:specVanish", default)]
+    pub spec_vanish: Option<XmlOnOffAttr>,
+}
+
+#[derive(Debug, Deserialize, Default, Clone)]
+pub(crate) struct IndentXml {
+    #[serde(
+        rename = "@left",
+        alias = "@w:left",
+        alias = "@start",
+        alias = "@w:start",
+        default
+    )]
+    pub left: Option<String>,
+    #[serde(
+        rename = "@right",
+        alias = "@w:right",
+        alias = "@end",
+        alias = "@w:end",
+        default
+    )]
+    pub right: Option<String>,
+    #[serde(rename = "@hanging", alias = "@w:hanging", default)]
+    pub hanging: Option<String>,
+    #[serde(rename = "@firstLine", alias = "@w:firstLine", default)]
+    pub first_line: Option<String>,
+    #[serde(rename = "@startChars", alias = "@w:startChars", default)]
+    pub start_chars: Option<String>,
+    #[serde(rename = "@hangingChars", alias = "@w:hangingChars", default)]
+    pub hanging_chars: Option<String>,
+    #[serde(rename = "@firstLineChars", alias = "@w:firstLineChars", default)]
+    pub first_line_chars: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Default, Clone)]
+pub(crate) struct LineSpacingXml {
+    #[serde(rename = "@lineRule", alias = "@w:lineRule", default)]
+    pub line_rule: Option<String>,
+    #[serde(rename = "@before", alias = "@w:before", default)]
+    pub before: Option<String>,
+    #[serde(rename = "@after", alias = "@w:after", default)]
+    pub after: Option<String>,
+    #[serde(rename = "@beforeLines", alias = "@w:beforeLines", default)]
+    pub before_lines: Option<String>,
+    #[serde(rename = "@afterLines", alias = "@w:afterLines", default)]
+    pub after_lines: Option<String>,
+    #[serde(rename = "@line", alias = "@w:line", default)]
+    pub line: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Default, Clone)]
+pub(crate) struct ParagraphPropertyXml {
+    #[serde(rename = "rPr", alias = "w:rPr", default)]
+    pub run_property: Option<RunPropertyXml>,
+    #[serde(rename = "pStyle", alias = "w:pStyle", default)]
+    pub style: Option<XmlValueAttr>,
+    #[serde(rename = "jc", alias = "w:jc", default)]
+    pub alignment: Option<XmlValueAttr>,
+    #[serde(rename = "ind", alias = "w:ind", default)]
+    pub indent: Option<IndentXml>,
+    #[serde(rename = "spacing", alias = "w:spacing", default)]
+    pub spacing: Option<LineSpacingXml>,
+    #[serde(rename = "textAlignment", alias = "w:textAlignment", default)]
+    pub text_alignment: Option<XmlValueAttr>,
+    #[serde(rename = "adjustRightInd", alias = "w:adjustRightInd", default)]
+    pub adjust_right_ind: Option<XmlValueAttr>,
+    #[serde(rename = "outlineLvl", alias = "w:outlineLvl", default)]
+    pub outline_lvl: Option<XmlValueAttr>,
+    #[serde(rename = "snapToGrid", alias = "w:snapToGrid", default)]
+    pub snap_to_grid: Option<XmlOnOffAttr>,
+    #[serde(rename = "keepNext", alias = "w:keepNext", default)]
+    pub keep_next: Option<XmlOnOffAttr>,
+    #[serde(rename = "keepLines", alias = "w:keepLines", default)]
+    pub keep_lines: Option<XmlOnOffAttr>,
+    #[serde(rename = "pageBreakBefore", alias = "w:pageBreakBefore", default)]
+    pub page_break_before: Option<XmlOnOffAttr>,
+    #[serde(rename = "widowControl", alias = "w:widowControl", default)]
+    pub widow_control: Option<XmlOnOffAttr>,
+    #[serde(rename = "divId", alias = "w:divId", default)]
+    pub div_id: Option<XmlValueAttr>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+struct StyleXml {
+    #[serde(rename = "@styleId", alias = "@w:styleId", default)]
+    style_id: Option<String>,
+    #[serde(rename = "@type", alias = "@w:type", default)]
+    style_type: Option<String>,
+    #[serde(rename = "name", alias = "w:name", default)]
+    name: Option<XmlValueAttr>,
+    #[serde(rename = "basedOn", alias = "w:basedOn", default)]
+    based_on: Option<XmlValueAttr>,
+    #[serde(rename = "next", alias = "w:next", default)]
+    next: Option<XmlValueAttr>,
+    #[serde(rename = "link", alias = "w:link", default)]
+    link: Option<XmlValueAttr>,
+    #[serde(rename = "rPr", alias = "w:rPr", default)]
+    run_property: Option<RunPropertyXml>,
+    #[serde(rename = "pPr", alias = "w:pPr", default)]
+    paragraph_property: Option<ParagraphPropertyXml>,
+}
+
+// ============================================================================
+// Parsing Helper Functions
+// ============================================================================
+
+fn parse_on_off(v: Option<&str>) -> bool {
+    !matches!(
+        v.map(|x| x.trim().to_ascii_lowercase()),
+        Some(ref s) if s == "0" || s == "false"
+    )
+}
+
+fn parse_usize(raw: Option<String>) -> Option<usize> {
+    raw.and_then(|v| {
+        v.parse::<usize>()
+            .ok()
+            .or_else(|| v.parse::<f32>().ok().map(|f| f as usize))
+    })
+}
+
+fn parse_i32(raw: Option<String>) -> Option<i32> {
+    raw.and_then(|v| {
+        v.parse::<i32>()
+            .ok()
+            .or_else(|| v.parse::<f64>().ok().map(|f| f as i32))
+    })
+}
+
+fn parse_u32(raw: Option<String>) -> Option<u32> {
+    raw.and_then(|v| v.parse::<u32>().ok())
+}
+
+pub(crate) fn parse_run_property_xml(xml: Option<RunPropertyXml>) -> RunProperty {
+    let Some(xml) = xml else {
+        return RunProperty::new();
+    };
+
+    let mut rp = RunProperty::new();
+    if let Some(v) = xml.style.and_then(|v| v.val) {
+        rp = rp.style(&v);
+    }
+    if let Some(v) = parse_usize(xml.size.and_then(|v| v.val)) {
+        rp = rp.size(v);
+    }
+    if let Some(v) = xml.color.and_then(|v| v.val) {
+        rp = rp.color(v);
+    }
+    if let Some(v) = xml.highlight.and_then(|v| v.val) {
+        rp = rp.highlight(v);
+    }
+    if let Some(v) = parse_i32(xml.spacing.and_then(|v| v.val)) {
+        rp = rp.spacing(v);
+    }
+    if let Some(v) = xml.underline.and_then(|v| v.val) {
+        rp = rp.underline(v);
+    }
+    if let Some(v) = xml.bold {
+        rp = if parse_on_off(v.val.as_deref()) {
+            rp.bold()
+        } else {
+            rp.disable_bold()
+        };
+    }
+    if let Some(v) = xml.italic {
+        rp = if parse_on_off(v.val.as_deref()) {
+            rp.italic()
+        } else {
+            rp.disable_italic()
+        };
+    }
+    if let Some(v) = xml.strike {
+        rp = if parse_on_off(v.val.as_deref()) {
+            rp.strike()
+        } else {
+            rp.disable_strike()
+        };
+    }
+    if let Some(v) = xml.dstrike {
+        rp = if parse_on_off(v.val.as_deref()) {
+            rp.dstrike()
+        } else {
+            rp.disable_dstrike()
+        };
+    }
+    if xml.vanish.is_some() {
+        rp = rp.vanish();
+    }
+    if xml.spec_vanish.is_some() {
+        rp = rp.spec_vanish();
+    }
+    if let Some(fonts) = xml.fonts {
+        let mut f = RunFonts::new();
+        if let Some(v) = fonts.ascii {
+            f = f.ascii(v);
+        }
+        if let Some(v) = fonts.east_asia {
+            f = f.east_asia(v);
+        }
+        if let Some(v) = fonts.h_ansi {
+            f = f.hi_ansi(v);
+        }
+        if let Some(v) = fonts.cs {
+            f = f.cs(v);
+        }
+        if let Some(v) = fonts.ascii_theme {
+            f = f.ascii_theme(v);
+        }
+        if let Some(v) = fonts.east_asia_theme {
+            f = f.east_asia_theme(v);
+        }
+        if let Some(v) = fonts.h_ansi_theme {
+            f = f.hi_ansi_theme(v);
+        }
+        if let Some(v) = fonts.cs_theme {
+            f = f.cs_theme(v);
+        }
+        if let Some(v) = fonts.hint {
+            f = f.hint(v);
+        }
+        rp = rp.fonts(f);
+    }
+
+    rp
+}
+
+pub(crate) fn parse_paragraph_property_xml(xml: Option<ParagraphPropertyXml>) -> ParagraphProperty {
+    let Some(xml) = xml else {
+        return ParagraphProperty::new();
+    };
+
+    let mut p = ParagraphProperty::new();
+    if let Some(v) = xml.style.and_then(|v| v.val) {
+        p = p.style(&v);
+    }
+    if let Some(v) = xml.alignment.and_then(|v| v.val) {
+        if let Ok(alignment) = AlignmentType::from_str(&v) {
+            p = p.align(alignment);
+        }
+    }
+    if let Some(v) = xml.text_alignment.and_then(|v| v.val) {
+        if let Ok(text_alignment) = TextAlignmentType::from_str(&v) {
+            p = p.text_alignment(text_alignment);
+        }
+    }
+    if let Some(v) = parse_i32(xml.adjust_right_ind.and_then(|v| v.val)) {
+        p = p.adjust_right_ind(v as isize);
+    }
+    if let Some(v) = parse_usize(xml.outline_lvl.and_then(|v| v.val)) {
+        p = p.outline_lvl(v);
+    }
+    if let Some(v) = xml.snap_to_grid {
+        p.snap_to_grid = Some(parse_on_off(v.val.as_deref()));
+    }
+    if let Some(v) = xml.keep_next {
+        if parse_on_off(v.val.as_deref()) {
+            p.keep_next = Some(true);
+        }
+    }
+    if let Some(v) = xml.keep_lines {
+        if parse_on_off(v.val.as_deref()) {
+            p.keep_lines = Some(true);
+        }
+    }
+    if let Some(v) = xml.page_break_before {
+        if parse_on_off(v.val.as_deref()) {
+            p.page_break_before = Some(true);
+        }
+    }
+    if let Some(v) = xml.widow_control {
+        if parse_on_off(v.val.as_deref()) {
+            p.widow_control = Some(true);
+        }
+    }
+    if let Some(v) = xml.div_id.and_then(|v| v.val) {
+        p.div_id = Some(v);
+    }
+    if let Some(ind) = xml.indent {
+        let start = parse_i32(ind.left);
+        let end = parse_i32(ind.right);
+        let special = if let Some(v) = parse_i32(ind.hanging.clone()) {
+            Some(SpecialIndentType::Hanging(v))
+        } else {
+            parse_i32(ind.first_line.clone()).map(SpecialIndentType::FirstLine)
+        };
+        let start_chars = parse_i32(ind.start_chars);
+        p = p.indent(start, special, end, start_chars);
+        if let Some(v) = parse_i32(ind.hanging_chars) {
+            p = p.hanging_chars(v);
+        }
+        if let Some(v) = parse_i32(ind.first_line_chars) {
+            p = p.first_line_chars(v);
+        }
+    }
+    if let Some(sp) = xml.spacing {
+        let mut ls = LineSpacing::new();
+        let mut has_spacing = false;
+        if let Some(v) = sp.line_rule {
+            if let Ok(rule) = LineSpacingType::from_str(&v) {
+                ls = ls.line_rule(rule);
+                has_spacing = true;
+            }
+        }
+        if let Some(v) = parse_u32(sp.before) {
+            ls = ls.before(v);
+            has_spacing = true;
+        }
+        if let Some(v) = parse_u32(sp.after) {
+            ls = ls.after(v);
+            has_spacing = true;
+        }
+        if let Some(v) = parse_u32(sp.before_lines) {
+            ls = ls.before_lines(v);
+            has_spacing = true;
+        }
+        if let Some(v) = parse_u32(sp.after_lines) {
+            ls = ls.after_lines(v);
+            has_spacing = true;
+        }
+        if let Some(v) = parse_i32(sp.line) {
+            ls = ls.line(v);
+            has_spacing = true;
+        }
+        if has_spacing {
+            p = p.line_spacing(ls);
+        }
+    }
+    if let Some(run_property) = xml.run_property {
+        p.run_property = parse_run_property_xml(Some(run_property));
+    }
+
+    p
+}
+
+impl<'de> Deserialize<'de> for Style {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let xml = StyleXml::deserialize(deserializer)?;
+        let style_id = xml.style_id.unwrap_or_default();
+        let style_type = xml
+            .style_type
+            .as_deref()
+            .and_then(|v| StyleType::from_str(v).ok())
+            .unwrap_or(StyleType::Paragraph);
+
+        let mut style = Style::new(style_id, style_type);
+        if let Some(v) = xml.name.and_then(|v| v.val) {
+            style = style.name(v);
+        }
+        if let Some(v) = xml.based_on.and_then(|v| v.val) {
+            style = style.based_on(v);
+        }
+        if let Some(v) = xml.next.and_then(|v| v.val) {
+            style = style.next(v);
+        }
+        if let Some(v) = xml.link.and_then(|v| v.val) {
+            style = style.link(v);
+        }
+        style.run_property = parse_run_property_xml(xml.run_property);
+        style.paragraph_property = parse_paragraph_property_xml(xml.paragraph_property);
+        Ok(style)
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]

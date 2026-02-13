@@ -2,14 +2,23 @@ use super::*;
 use crate::documents::BuildXML;
 use crate::types::*;
 use crate::xml_builder::*;
+use serde::{Deserialize, Serialize};
 use std::io::Write;
 
-use serde::Serialize;
-
-#[derive(Debug, Clone, PartialEq, Serialize, Default)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct Numberings {
+    #[serde(
+        rename(serialize = "abstractNums", deserialize = "abstractNum"),
+        alias = "w:abstractNum",
+        default
+    )]
     pub abstract_nums: Vec<AbstractNumbering>,
+    #[serde(
+        rename(serialize = "numberings", deserialize = "num"),
+        alias = "w:num",
+        default
+    )]
     pub numberings: Vec<Numbering>,
 }
 

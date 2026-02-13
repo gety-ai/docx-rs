@@ -1,17 +1,62 @@
-use serde::Serialize;
+use serde::{Deserialize, Deserializer, Serialize};
 use std::io::Write;
 
 use crate::{documents::BuildXML, RunProperty};
 use crate::{xml_builder::*, LineSpacing, ParagraphProperty, ParagraphPropertyDefault};
 
 use super::run_property_default::*;
+use super::style::{
+    parse_paragraph_property_xml, parse_run_property_xml, ParagraphPropertyXml, RunPropertyXml,
+};
 use super::RunFonts;
+
+#[derive(Debug, Deserialize, Default)]
+struct RunPropertyDefaultXml {
+    #[serde(rename = "rPr", alias = "w:rPr", default)]
+    run_property: Option<RunPropertyXml>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+struct ParagraphPropertyDefaultXml {
+    #[serde(rename = "pPr", alias = "w:pPr", default)]
+    paragraph_property: Option<ParagraphPropertyXml>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+struct DocDefaultsXml {
+    #[serde(rename = "rPrDefault", alias = "w:rPrDefault", default)]
+    run_property_default: Option<RunPropertyDefaultXml>,
+    #[serde(rename = "pPrDefault", alias = "w:pPrDefault", default)]
+    paragraph_property_default: Option<ParagraphPropertyDefaultXml>,
+}
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DocDefaults {
     run_property_default: RunPropertyDefault,
     paragraph_property_default: ParagraphPropertyDefault,
+}
+
+impl<'de> Deserialize<'de> for DocDefaults {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let xml = DocDefaultsXml::deserialize(deserializer)?;
+        let mut doc_defaults = DocDefaults::new();
+
+        if let Some(run_defaults) = xml.run_property_default {
+            let run_property = parse_run_property_xml(run_defaults.run_property);
+            doc_defaults = doc_defaults.run_property(run_property);
+        }
+        if let Some(paragraph_defaults) = xml.paragraph_property_default {
+            let paragraph_property =
+                parse_paragraph_property_xml(paragraph_defaults.paragraph_property);
+            doc_defaults = doc_defaults.paragraph_property(paragraph_property);
+        }
+
+        Ok(doc_defaults)
+    }
 }
 
 impl DocDefaults {

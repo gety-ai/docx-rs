@@ -1,4 +1,4 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::io::Write;
 
 use super::*;
@@ -6,9 +6,15 @@ use crate::documents::BuildXML;
 use crate::xml_builder::*;
 
 // i.e.    <w15:commentEx w15:paraId="00000001" w15:paraIdParent="57D1BD7C" w15:done="0"/>
-#[derive(Debug, Clone, PartialEq, Serialize, Default)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct CommentsExtended {
+    #[serde(
+        rename(serialize = "children", deserialize = "commentEx"),
+        alias = "w15:commentEx",
+        alias = "children",
+        default
+    )]
     pub children: Vec<CommentExtended>,
 }
 

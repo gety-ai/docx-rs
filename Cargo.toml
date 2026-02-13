@@ -4,4 +4,5 @@ resolver = "2"
 members = [
     "docx-core",
     "docx-wasm",
+    "benchmarks/docx-perf",
 ]

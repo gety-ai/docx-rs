@@ -1,4 +1,4 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::io::Write;
 
 use super::*;
@@ -6,10 +6,21 @@ use crate::documents::BuildXML;
 use crate::types::*;
 use crate::xml_builder::*;
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Styles {
+    #[serde(
+        rename(serialize = "docDefaults", deserialize = "docDefaults"),
+        alias = "w:docDefaults",
+        default
+    )]
     pub doc_defaults: DocDefaults,
+    #[serde(
+        rename(serialize = "styles", deserialize = "style"),
+        alias = "w:style",
+        alias = "styles",
+        default
+    )]
     pub styles: Vec<Style>,
 }
 

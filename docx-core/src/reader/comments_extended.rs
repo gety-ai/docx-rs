@@ -1,51 +1,34 @@
-use std::io::Read;
-use std::str::FromStr;
-
-use xml::reader::{EventReader, XmlEvent};
+use quick_xml::de::from_reader;
+use std::io::{BufReader, Read};
 
 use super::*;
 
+fn dedup_by_paragraph_id(children: Vec<CommentExtended>) -> Vec<CommentExtended> {
+    let mut deduped: Vec<CommentExtended> = Vec::with_capacity(children.len());
+    for ex in children {
+        if let Some(pos) = deduped
+            .iter()
+            .position(|current: &CommentExtended| current.paragraph_id == ex.paragraph_id)
+        {
+            deduped[pos] = ex;
+        } else {
+            deduped.push(ex);
+        }
+    }
+    deduped
+}
+
+impl FromXMLQuickXml for CommentsExtended {
+    fn from_xml_quick<R: Read>(reader: R) -> Result<Self, ReaderError> {
+        let parsed: CommentsExtended = from_reader(BufReader::new(reader))?;
+        Ok(CommentsExtended {
+            children: dedup_by_paragraph_id(parsed.children),
+        })
+    }
+}
+
 impl FromXML for CommentsExtended {
     fn from_xml<R: Read>(reader: R) -> Result<Self, ReaderError> {
-        let mut r = EventReader::new(reader);
-        let mut comments_extended: Vec<CommentExtended> = vec![];
-        loop {
-            let e = r.next();
-            match e {
-                Ok(XmlEvent::StartElement {
-                    name, attributes, ..
-                }) => {
-                    let e = XMLElement::from_str(&name.local_name)
-                        .expect("should convert to XMLElement");
-                    if let XMLElement::CommentExtended = e {
-                        if let Ok(ex) = CommentExtended::read(&mut r, &attributes) {
-                            if let Some(pos) = comments_extended
-                                .iter()
-                                .position(|e| e.paragraph_id == ex.paragraph_id)
-                            {
-                                comments_extended[pos] = ex;
-                            } else {
-                                comments_extended.push(ex);
-                            }
-                        }
-                    }
-                }
-                Ok(XmlEvent::EndElement { name, .. }) => {
-                    let e = XMLElement::from_str(&name.local_name).unwrap();
-                    if e == XMLElement::CommentsExtended {
-                        return Ok(CommentsExtended {
-                            children: comments_extended,
-                        });
-                    }
-                }
-                Ok(XmlEvent::EndDocument { .. }) => {
-                    return Ok(CommentsExtended {
-                        children: comments_extended,
-                    });
-                }
-                Err(_) => return Err(ReaderError::XMLReadError),
-                _ => {}
-            }
-        }
+        Self::from_xml_quick(reader)
     }
 }

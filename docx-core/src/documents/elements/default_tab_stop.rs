@@ -2,11 +2,32 @@ use crate::documents::BuildXML;
 use crate::xml_builder::*;
 use std::io::Write;
 
-use serde::{Serialize, Serializer};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct DefaultTabStop {
     val: usize,
+}
+
+// XML deserialization helper
+#[derive(Deserialize)]
+struct DefaultTabStopXml {
+    #[serde(rename = "@val", alias = "@w:val", default)]
+    val: Option<String>,
+}
+
+impl<'de> Deserialize<'de> for DefaultTabStop {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let xml = DefaultTabStopXml::deserialize(deserializer)?;
+        let val = xml
+            .val
+            .and_then(|v| v.parse::<f32>().ok().map(|f| f as usize))
+            .unwrap_or(840);
+        Ok(DefaultTabStop { val })
+    }
 }
 
 impl DefaultTabStop {

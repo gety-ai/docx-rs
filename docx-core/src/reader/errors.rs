@@ -12,6 +12,8 @@ pub enum ReaderError {
     TypeError(#[from] crate::types::TypeError),
     #[error("Failed to read xml.")]
     XMLReadError,
+    #[error("Failed to parse quick-xml: {0}")]
+    QuickXMLError(#[from] quick_xml::de::DeError),
     #[error("Failed to find document.")]
     DocumentNotFoundError,
     #[error("Failed to find document rels.")]

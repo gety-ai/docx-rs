@@ -1,127 +1,18 @@
-use std::io::Read;
-use xml::reader::{EventReader, XmlEvent};
+use quick_xml::de::from_reader;
+use std::io::{BufReader, Read};
 
 use super::*;
-use crate::reader::{FromXML, ReaderError};
+use crate::reader::{FromXML, FromXMLQuickXml, ReaderError};
 
-use std::str::FromStr;
+impl FromXMLQuickXml for Numberings {
+    fn from_xml_quick<R: Read>(reader: R) -> Result<Self, ReaderError> {
+        Ok(from_reader(BufReader::new(reader))?)
+    }
+}
 
 impl FromXML for Numberings {
     fn from_xml<R: Read>(reader: R) -> Result<Self, ReaderError> {
-        let mut parser = EventReader::new(reader);
-        let mut nums = Self::default();
-        loop {
-            let e = parser.next();
-            match e {
-                Ok(XmlEvent::StartElement {
-                    attributes, name, ..
-                }) => {
-                    let e = XMLElement::from_str(&name.local_name).unwrap();
-                    match e {
-                        XMLElement::AbstractNumbering => {
-                            let mut id = 0;
-                            for a in attributes {
-                                let local_name = &a.name.local_name;
-                                if local_name == "abstractNumId" {
-                                    id = usize::from_str(&a.value)?;
-                                }
-                            }
-                            let mut abs_num = AbstractNumbering::new(id);
-                            loop {
-                                let e = parser.next();
-                                match e {
-                                    Ok(XmlEvent::StartElement {
-                                        attributes, name, ..
-                                    }) => {
-                                        let e = XMLElement::from_str(&name.local_name).unwrap();
-                                        match e {
-                                            XMLElement::Level => {
-                                                let l = Level::read(&mut parser, &attributes)?;
-                                                abs_num = abs_num.add_level(l);
-                                            }
-                                            XMLElement::StyleLink => {
-                                                abs_num = abs_num.style_link(&attributes[0].value)
-                                            }
-                                            XMLElement::NumStyleLink => {
-                                                abs_num =
-                                                    abs_num.num_style_link(&attributes[0].value)
-                                            }
-                                            _ => {}
-                                        }
-                                    }
-                                    Ok(XmlEvent::EndElement { name, .. }) => {
-                                        let e = XMLElement::from_str(&name.local_name).unwrap();
-                                        if let XMLElement::AbstractNumbering = e {
-                                            nums = nums.add_abstract_numbering(abs_num);
-                                            break;
-                                        }
-                                    }
-                                    _ => {}
-                                }
-                            }
-                            continue;
-                        }
-                        XMLElement::Num => {
-                            let mut id = 0;
-                            for a in attributes {
-                                let local_name = &a.name.local_name;
-                                if local_name == "numId" {
-                                    id = usize::from_str(&a.value)?;
-                                }
-                            }
-                            let mut abs_num_id = 0;
-                            let mut level_overrides = vec![];
-
-                            loop {
-                                let e = parser.next();
-                                match e {
-                                    Ok(XmlEvent::StartElement {
-                                        attributes, name, ..
-                                    }) => {
-                                        let e = XMLElement::from_str(&name.local_name).unwrap();
-                                        match e {
-                                            XMLElement::AbstractNumberingId => {
-                                                abs_num_id = usize::from_str(&attributes[0].value)?
-                                            }
-                                            XMLElement::LvlOverride => {
-                                                if let Ok(o) =
-                                                    LevelOverride::read(&mut parser, &attributes)
-                                                {
-                                                    level_overrides.push(o);
-                                                }
-                                            }
-                                            _ => {}
-                                        }
-                                    }
-                                    Ok(XmlEvent::EndElement { name, .. }) => {
-                                        let e = XMLElement::from_str(&name.local_name).unwrap();
-                                        if let XMLElement::Num = e {
-                                            let num = Numbering::new(id, abs_num_id);
-                                            nums =
-                                                nums.add_numbering(num.overrides(level_overrides));
-                                            break;
-                                        }
-                                    }
-                                    _ => {}
-                                }
-                            }
-                            continue;
-                        }
-                        _ => {}
-                    }
-                }
-                Ok(XmlEvent::EndElement { name, .. }) => {
-                    let e = XMLElement::from_str(&name.local_name).unwrap();
-                    if let XMLElement::Numbering = e {
-                        break;
-                    }
-                }
-                Ok(XmlEvent::EndDocument { .. }) => break,
-                Err(_) => return Err(ReaderError::XMLReadError),
-                _ => {}
-            }
-        }
-        Ok(nums)
+        Self::from_xml_quick(reader)
     }
 }
 
@@ -156,24 +47,24 @@ mod tests {
 </w:numbering>"#;
         let n = Numberings::from_xml(xml.as_bytes()).unwrap();
         let mut nums = Numberings::new();
-        nums = nums
-            .add_abstract_numbering(
-                AbstractNumbering::new(0).add_level(
-                    Level::new(
-                        0,
-                        Start::new(1),
-                        NumberFormat::new("bullet"),
-                        LevelText::new("●"),
-                        LevelJc::new("left"),
-                    )
-                    .indent(
-                        Some(720),
-                        Some(SpecialIndentType::Hanging(360)),
-                        None,
-                        None,
-                    ),
-                ),
+        let mut abs_num = AbstractNumbering::new(0).add_level(
+            Level::new(
+                0,
+                Start::new(1),
+                NumberFormat::new("bullet"),
+                LevelText::new("●"),
+                LevelJc::new("left"),
             )
+            .indent(
+                Some(720),
+                Some(SpecialIndentType::Hanging(360)),
+                None,
+                None,
+            ),
+        );
+        abs_num.multi_level_type = Some("hybridMultilevel".to_string());
+        nums = nums
+            .add_abstract_numbering(abs_num)
             .add_numbering(Numbering::new(1, 0));
         assert_eq!(n, nums)
     }
@@ -192,8 +83,10 @@ mod tests {
 </w:numbering>"#;
         let n = Numberings::from_xml(xml.as_bytes()).unwrap();
         let mut nums = Numberings::new();
+        let mut abs_num = AbstractNumbering::new(0).num_style_link("style1");
+        abs_num.multi_level_type = Some("hybridMultilevel".to_string());
         nums = nums
-            .add_abstract_numbering(AbstractNumbering::new(0).num_style_link("style1"))
+            .add_abstract_numbering(abs_num)
             .add_numbering(Numbering::new(1, 0));
         assert_eq!(n, nums)
     }
@@ -212,8 +105,10 @@ mod tests {
 </w:numbering>"#;
         let n = Numberings::from_xml(xml.as_bytes()).unwrap();
         let mut nums = Numberings::new();
+        let mut abs_num = AbstractNumbering::new(0).style_link("style1");
+        abs_num.multi_level_type = Some("hybridMultilevel".to_string());
         nums = nums
-            .add_abstract_numbering(AbstractNumbering::new(0).style_link("style1"))
+            .add_abstract_numbering(abs_num)
             .add_numbering(Numbering::new(1, 0));
         assert_eq!(n, nums)
     }
@@ -242,9 +137,9 @@ mod tests {
             LevelOverride::new(1).start(1),
         ];
         let num = Numbering::new(1, 0).overrides(overrides);
-        nums = nums
-            .add_abstract_numbering(AbstractNumbering::new(0))
-            .add_numbering(num);
+        let mut abs_num = AbstractNumbering::new(0);
+        abs_num.multi_level_type = Some("hybridMultilevel".to_string());
+        nums = nums.add_abstract_numbering(abs_num).add_numbering(num);
         assert_eq!(n, nums)
     }
 }

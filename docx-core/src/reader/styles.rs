@@ -1,49 +1,18 @@
-use std::io::Read;
-use xml::reader::{EventReader, XmlEvent};
+use quick_xml::de::from_reader;
+use std::io::{BufReader, Read};
 
 use super::*;
-use crate::reader::{FromXML, ReaderError};
+use crate::reader::{FromXML, FromXMLQuickXml, ReaderError};
 
-use std::str::FromStr;
+impl FromXMLQuickXml for Styles {
+    fn from_xml_quick<R: Read>(reader: R) -> Result<Self, ReaderError> {
+        Ok(from_reader(BufReader::new(reader))?)
+    }
+}
 
 impl FromXML for Styles {
     fn from_xml<R: Read>(reader: R) -> Result<Self, ReaderError> {
-        let mut parser = EventReader::new(reader);
-        let mut styles = Self::default();
-        loop {
-            let e = parser.next();
-            match e {
-                Ok(XmlEvent::StartElement {
-                    attributes, name, ..
-                }) => {
-                    let e = XMLElement::from_str(&name.local_name).unwrap();
-                    match e {
-                        XMLElement::Style => {
-                            if let Ok(s) = Style::read(&mut parser, &attributes) {
-                                styles = styles.add_style(s);
-                            }
-                            continue;
-                        }
-                        XMLElement::DocDefaults => {
-                            if let Ok(d) = DocDefaults::read(&mut parser, &attributes) {
-                                styles = styles.doc_defaults(d);
-                            }
-                            continue;
-                        }
-                        _ => {}
-                    }
-                }
-                Ok(XmlEvent::EndElement { name, .. }) => {
-                    let e = XMLElement::from_str(&name.local_name).unwrap();
-                    if let XMLElement::Styles = e {
-                        break;
-                    }
-                }
-                Err(_) => return Err(ReaderError::XMLReadError),
-                _ => {}
-            }
-        }
-        Ok(styles)
+        Self::from_xml_quick(reader)
     }
 }
 

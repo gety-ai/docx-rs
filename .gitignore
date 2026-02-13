@@ -20,3 +20,10 @@ docx-core/bindings
 test.json
 image.json
 docx-core/tests/output/*.json
+
+# Benchmark generated artifacts
+benchmarks/docx-perf/assets/extracted/*
+!benchmarks/docx-perf/assets/extracted/.gitkeep
+benchmarks/docx-perf/results/*
+!benchmarks/docx-perf/results/.gitkeep
+dhat-heap.json
