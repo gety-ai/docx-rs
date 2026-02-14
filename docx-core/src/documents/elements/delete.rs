@@ -1,9 +1,64 @@
 use serde::ser::{SerializeStruct, Serializer};
-use serde::Serialize;
+use serde::{Deserialize, Deserializer, Serialize};
 use std::io::Write;
 
 use crate::xml_builder::*;
 use crate::{documents::*, escape};
+
+// ============================================================================
+// XML Deserialization Helper Structures (for quick-xml serde)
+// ============================================================================
+
+#[derive(Debug, Deserialize, Default)]
+struct DeleteXml {
+    #[serde(rename = "@id", alias = "@w:id", default)]
+    _id: Option<String>,
+    #[serde(rename = "@author", alias = "@w:author", default)]
+    author: Option<String>,
+    #[serde(rename = "@date", alias = "@w:date", default)]
+    date: Option<String>,
+    #[serde(rename = "$value", default)]
+    children: Vec<DeleteChildXml>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+struct XmlIdNode {
+    #[serde(rename = "@id", alias = "@w:id", default)]
+    id: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+enum DeleteChildXml {
+    #[serde(rename = "r", alias = "w:r")]
+    Run(Run),
+    #[serde(rename = "commentRangeStart", alias = "w:commentRangeStart")]
+    CommentStart(XmlIdNode),
+    #[serde(rename = "commentRangeEnd", alias = "w:commentRangeEnd")]
+    CommentEnd(XmlIdNode),
+    #[serde(other)]
+    Unknown,
+}
+
+fn parse_optional_usize(v: Option<String>) -> Option<usize> {
+    v.and_then(|s| s.parse::<usize>().ok())
+}
+
+fn delete_child_from_xml(xml: DeleteChildXml) -> Option<DeleteChild> {
+    match xml {
+        DeleteChildXml::Run(run) => Some(DeleteChild::Run(run)),
+        DeleteChildXml::CommentStart(node) => {
+            let id = parse_optional_usize(node.id)?;
+            Some(DeleteChild::CommentStart(Box::new(CommentRangeStart::new(
+                Comment::new(id),
+            ))))
+        }
+        DeleteChildXml::CommentEnd(node) => {
+            let id = parse_optional_usize(node.id)?;
+            Some(DeleteChild::CommentEnd(CommentRangeEnd::new(id)))
+        }
+        DeleteChildXml::Unknown => None,
+    }
+}
 
 #[derive(Serialize, Debug, Clone, PartialEq)]
 pub struct Delete {
@@ -17,6 +72,30 @@ pub enum DeleteChild {
     Run(Run),
     CommentStart(Box<CommentRangeStart>),
     CommentEnd(CommentRangeEnd),
+}
+
+impl<'de> Deserialize<'de> for Delete {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let xml = DeleteXml::deserialize(deserializer)?;
+        let mut delete = Delete::default();
+
+        if let Some(author) = xml.author {
+            delete.author = author;
+        }
+        if let Some(date) = xml.date {
+            delete.date = date;
+        }
+
+        delete.children = xml
+            .children
+            .into_iter()
+            .filter_map(delete_child_from_xml)
+            .collect();
+        Ok(delete)
+    }
 }
 
 impl Serialize for DeleteChild {
@@ -130,5 +209,28 @@ mod tests {
             str::from_utf8(&b).unwrap(),
             r#"<w:del w:id="123" w:author="unnamed" w:date="1970-01-01T00:00:00Z"><w:r><w:rPr /></w:r></w:del>"#
         );
+    }
+
+    #[test]
+    fn test_delete_xml_deserialize() {
+        let xml = r#"<w:del xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" w:id="3" w:author="Jane" w:date="2024-01-03T00:00:00Z">
+            <w:r><w:delText>deleted text</w:delText></w:r>
+            <w:commentRangeStart w:id="6"/>
+            <w:commentRangeEnd w:id="6"/>
+        </w:del>"#;
+
+        let del: Delete = quick_xml::de::from_str(xml).unwrap();
+        assert_eq!(del.author, "Jane");
+        assert_eq!(del.date, "2024-01-03T00:00:00Z");
+        assert_eq!(del.children.len(), 3);
+        assert!(matches!(&del.children[0], DeleteChild::Run(_)));
+        assert!(matches!(
+            &del.children[1],
+            DeleteChild::CommentStart(c) if c.id == 6
+        ));
+        assert!(matches!(
+            &del.children[2],
+            DeleteChild::CommentEnd(c) if c == &CommentRangeEnd::new(6)
+        ));
     }
 }

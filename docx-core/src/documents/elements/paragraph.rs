@@ -73,11 +73,11 @@ enum ParagraphChildXml {
     #[serde(rename = "commentRangeEnd", alias = "w:commentRangeEnd")]
     CommentEnd(XmlIdNode),
     #[serde(rename = "ins", alias = "w:ins")]
-    Insert(IgnoredAny),
+    Insert(Insert),
     #[serde(rename = "del", alias = "w:del")]
-    Delete(IgnoredAny),
+    Delete(Delete),
     #[serde(rename = "hyperlink", alias = "w:hyperlink")]
-    Hyperlink(IgnoredAny),
+    Hyperlink(Hyperlink),
     #[serde(rename = "sdt", alias = "w:sdt")]
     StructuredDataTag(IgnoredAny),
     #[serde(rename = "pPr", alias = "w:pPr")]
@@ -124,10 +124,10 @@ fn paragraph_child_from_xml(xml: ParagraphChildXml) -> Option<ParagraphChild> {
             let id = parse_optional_usize(node.id)?;
             Some(ParagraphChild::CommentEnd(CommentRangeEnd::new(id)))
         }
-        ParagraphChildXml::Insert(_)
-        | ParagraphChildXml::Delete(_)
-        | ParagraphChildXml::Hyperlink(_)
-        | ParagraphChildXml::StructuredDataTag(_)
+        ParagraphChildXml::Insert(insert) => Some(ParagraphChild::Insert(insert)),
+        ParagraphChildXml::Delete(delete) => Some(ParagraphChild::Delete(delete)),
+        ParagraphChildXml::Hyperlink(hyperlink) => Some(ParagraphChild::Hyperlink(hyperlink)),
+        ParagraphChildXml::StructuredDataTag(_)
         | ParagraphChildXml::ParagraphProperty(_)
         | ParagraphChildXml::Unknown => None,
     }

@@ -66,7 +66,7 @@ struct TableGridXml {
 #[derive(Debug, Deserialize)]
 enum TableChildXml {
     #[serde(rename = "tr", alias = "w:tr")]
-    TableRow(IgnoredAny),
+    TableRow(TableRow),
     #[serde(rename = "tblPr", alias = "w:tblPr")]
     TableProperty(IgnoredAny),
     #[serde(rename = "tblGrid", alias = "w:tblGrid")]
@@ -144,7 +144,7 @@ fn parse_table_grid_xml(xml: Option<TableGridXml>) -> Vec<usize> {
 
 fn table_child_from_xml(xml: TableChildXml) -> Option<TableChild> {
     match xml {
-        TableChildXml::TableRow(_) => Some(TableChild::TableRow(TableRow::new(vec![]))),
+        TableChildXml::TableRow(row) => Some(TableChild::TableRow(row)),
         TableChildXml::TableProperty(_) | TableChildXml::TableGrid(_) | TableChildXml::Unknown => {
             None
         }

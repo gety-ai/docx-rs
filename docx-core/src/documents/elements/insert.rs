@@ -1,11 +1,69 @@
 use serde::ser::{SerializeStruct, Serializer};
-use serde::Serialize;
+use serde::{Deserialize, Deserializer, Serialize};
 use std::io::Write;
 
 use super::*;
 
 use crate::documents::{BuildXML, HistoryId, Run};
 use crate::{escape, xml_builder::*};
+
+// ============================================================================
+// XML Deserialization Helper Structures (for quick-xml serde)
+// ============================================================================
+
+#[derive(Debug, Deserialize, Default)]
+struct InsertXml {
+    #[serde(rename = "@id", alias = "@w:id", default)]
+    _id: Option<String>,
+    #[serde(rename = "@author", alias = "@w:author", default)]
+    author: Option<String>,
+    #[serde(rename = "@date", alias = "@w:date", default)]
+    date: Option<String>,
+    #[serde(rename = "$value", default)]
+    children: Vec<InsertChildXml>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+struct XmlIdNode {
+    #[serde(rename = "@id", alias = "@w:id", default)]
+    id: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+enum InsertChildXml {
+    #[serde(rename = "r", alias = "w:r")]
+    Run(Run),
+    #[serde(rename = "del", alias = "w:del")]
+    Delete(Delete),
+    #[serde(rename = "commentRangeStart", alias = "w:commentRangeStart")]
+    CommentStart(XmlIdNode),
+    #[serde(rename = "commentRangeEnd", alias = "w:commentRangeEnd")]
+    CommentEnd(XmlIdNode),
+    #[serde(other)]
+    Unknown,
+}
+
+fn parse_optional_usize(v: Option<String>) -> Option<usize> {
+    v.and_then(|s| s.parse::<usize>().ok())
+}
+
+fn insert_child_from_xml(xml: InsertChildXml) -> Option<InsertChild> {
+    match xml {
+        InsertChildXml::Run(run) => Some(InsertChild::Run(Box::new(run))),
+        InsertChildXml::Delete(delete) => Some(InsertChild::Delete(delete)),
+        InsertChildXml::CommentStart(node) => {
+            let id = parse_optional_usize(node.id)?;
+            Some(InsertChild::CommentStart(Box::new(CommentRangeStart::new(
+                Comment::new(id),
+            ))))
+        }
+        InsertChildXml::CommentEnd(node) => {
+            let id = parse_optional_usize(node.id)?;
+            Some(InsertChild::CommentEnd(CommentRangeEnd::new(id)))
+        }
+        InsertChildXml::Unknown => None,
+    }
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum InsertChild {
@@ -68,6 +126,30 @@ pub struct Insert {
     pub children: Vec<InsertChild>,
     pub author: String,
     pub date: String,
+}
+
+impl<'de> Deserialize<'de> for Insert {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let xml = InsertXml::deserialize(deserializer)?;
+        let mut insert = Insert::default();
+
+        if let Some(author) = xml.author {
+            insert.author = author;
+        }
+        if let Some(date) = xml.date {
+            insert.date = date;
+        }
+
+        insert.children = xml
+            .children
+            .into_iter()
+            .filter_map(insert_child_from_xml)
+            .collect();
+        Ok(insert)
+    }
 }
 
 impl Default for Insert {
@@ -171,5 +253,28 @@ mod tests {
             str::from_utf8(&b).unwrap(),
             r#"<w:ins w:id="123" w:author="unnamed" w:date="1970-01-01T00:00:00Z"><w:r><w:rPr /></w:r></w:ins>"#
         );
+    }
+
+    #[test]
+    fn test_insert_xml_deserialize() {
+        let xml = r#"<w:ins xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" w:id="0" w:author="John" w:date="2024-01-01T00:00:00Z">
+            <w:r><w:t>inserted text</w:t></w:r>
+            <w:commentRangeStart w:id="5"/>
+            <w:commentRangeEnd w:id="5"/>
+        </w:ins>"#;
+
+        let ins: Insert = quick_xml::de::from_str(xml).unwrap();
+        assert_eq!(ins.author, "John");
+        assert_eq!(ins.date, "2024-01-01T00:00:00Z");
+        assert_eq!(ins.children.len(), 3);
+        assert!(matches!(&ins.children[0], InsertChild::Run(_)));
+        assert!(matches!(
+            &ins.children[1],
+            InsertChild::CommentStart(c) if c.id == 5
+        ));
+        assert!(matches!(
+            &ins.children[2],
+            InsertChild::CommentEnd(c) if c == &CommentRangeEnd::new(5)
+        ));
     }
 }
