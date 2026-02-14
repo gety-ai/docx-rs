@@ -1,50 +1,59 @@
 use super::*;
-use crate::reader::{FromXML, ReaderError};
-use std::str::FromStr;
+use crate::reader::{FromXML, FromXMLQuickXml, ReaderError};
+use serde::Deserialize;
 use std::{
     collections::{BTreeMap, BTreeSet},
-    io::Read,
+    io::{BufReader, Read},
     path::{Path, PathBuf},
 };
-use xml::reader::{EventReader, XmlEvent};
 
 pub type ReadRels = BTreeMap<String, BTreeSet<(RId, PathBuf, Option<String>)>>;
 
-impl FromXML for Rels {
-    fn from_xml<R: Read>(reader: R) -> Result<Self, ReaderError> {
-        let parser = EventReader::new(reader);
+// ============================================================================
+// XML Deserialization DTOs (quick-xml serde)
+// ============================================================================
+
+#[derive(Deserialize)]
+struct RelationshipXml {
+    #[serde(rename = "@Type", default)]
+    rel_type: String,
+    #[serde(rename = "@Id", default)]
+    id: String,
+    #[serde(rename = "@Target", default)]
+    target: String,
+    #[serde(rename = "@TargetMode", default)]
+    target_mode: Option<String>,
+}
+
+#[derive(Deserialize)]
+enum RelationshipsChildXml {
+    Relationship(RelationshipXml),
+    #[serde(other)]
+    Unknown,
+}
+
+#[derive(Deserialize)]
+struct RelationshipsXml {
+    #[serde(rename = "$value", default)]
+    children: Vec<RelationshipsChildXml>,
+}
+
+impl FromXMLQuickXml for Rels {
+    fn from_xml_quick<R: Read>(reader: R) -> Result<Self, ReaderError> {
+        let xml: RelationshipsXml = quick_xml::de::from_reader(BufReader::new(reader))?;
         let mut s = Self::default();
-        let mut depth = 0;
-        for e in parser {
-            match e {
-                Ok(XmlEvent::StartElement { attributes, .. }) => {
-                    if depth == 1 {
-                        let mut rel_type = "".to_owned();
-                        let mut target = "".to_owned();
-                        let mut id = "".to_owned();
-                        for attr in attributes {
-                            let name: &str = &attr.name.local_name;
-                            if name == "Type" {
-                                rel_type = attr.value.clone();
-                            } else if name == "Target" {
-                                target = attr.value.clone();
-                            } else if name == "Id" {
-                                id = attr.value.clone();
-                            }
-                        }
-                        // Preserve original relationship ID
-                        s.rels.push((rel_type, id, target));
-                    }
-                    depth += 1;
-                }
-                Ok(XmlEvent::EndElement { .. }) => {
-                    depth -= 1;
-                }
-                Err(_) => return Err(ReaderError::XMLReadError),
-                _ => {}
+        for child in xml.children {
+            if let RelationshipsChildXml::Relationship(r) = child {
+                s.rels.push((r.rel_type, r.id, r.target));
             }
         }
         Ok(s)
+    }
+}
+
+impl FromXML for Rels {
+    fn from_xml<R: Read>(reader: R) -> Result<Self, ReaderError> {
+        Self::from_xml_quick(reader)
     }
 }
 
@@ -63,61 +72,20 @@ pub fn find_rels_filename(main_path: impl AsRef<Path>) -> Result<PathBuf, Reader
 }
 
 pub fn read_rels_xml<R: Read>(reader: R, dir: impl AsRef<Path>) -> Result<ReadRels, ReaderError> {
-    let mut parser = EventReader::new(reader);
+    let xml: RelationshipsXml = quick_xml::de::from_reader(BufReader::new(reader))?;
     let mut rels: BTreeMap<String, BTreeSet<(RId, PathBuf, Option<String>)>> = BTreeMap::new();
 
-    loop {
-        let e = parser.next();
-        match e {
-            Ok(XmlEvent::StartElement {
-                attributes, name, ..
-            }) => {
-                let e = XMLElement::from_str(&name.local_name).unwrap();
-                if let XMLElement::Relationship = e {
-                    let mut rel_type = "".to_owned();
-                    let mut rid = "".to_owned();
-                    let mut target_mode = None;
-                    let mut target_string = "".to_owned();
-                    for a in attributes {
-                        let local_name = &a.name.local_name;
-                        if local_name == "Type" {
-                            rel_type = a.value.to_owned();
-                        } else if local_name == "Target" {
-                            // target_str = Path::new(dir.as_ref()).join(a.value);
-                            target_string = a.value.to_owned();
-                        } else if local_name == "Id" {
-                            rid = a.value.to_owned();
-                        } else if local_name == "TargetMode" {
-                            target_mode = Some(a.value.to_owned());
-                        }
-                    }
+    for child in xml.children {
+        if let RelationshipsChildXml::Relationship(r) = child {
+            let target = if !r.rel_type.ends_with("hyperlink") {
+                Path::new(dir.as_ref()).join(&r.target)
+            } else {
+                Path::new("").join(&r.target)
+            };
 
-                    let target = if !rel_type.ends_with("hyperlink") {
-                        Path::new(dir.as_ref()).join(target_string)
-                    } else {
-                        Path::new("").join(target_string)
-                    };
-
-                    let current = rels.remove(&rel_type);
-                    if let Some(mut paths) = current {
-                        paths.insert((rid, target, target_mode));
-                        rels.insert(rel_type, paths);
-                    } else {
-                        let s: BTreeSet<(RId, PathBuf, Option<String>)> =
-                            vec![(rid, target, target_mode)].into_iter().collect();
-                        rels.insert(rel_type, s);
-                    }
-                    continue;
-                }
-            }
-            Ok(XmlEvent::EndElement { name, .. }) => {
-                let e = XMLElement::from_str(&name.local_name).unwrap();
-                if let XMLElement::Relationships = e {
-                    break;
-                }
-            }
-            Err(_) => return Err(ReaderError::XMLReadError),
-            _ => {}
+            rels.entry(r.rel_type)
+                .or_insert_with(BTreeSet::new)
+                .insert((r.id, target, r.target_mode));
         }
     }
     Ok(rels)

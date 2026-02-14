@@ -1,10 +1,4 @@
-use std::io::Read;
 use std::str::FromStr;
-
-use xml::attribute::OwnedAttribute;
-use xml::reader::EventReader;
-
-use crate::reader::ReaderError;
 
 #[derive(PartialEq, Debug, Clone)]
 pub enum XMLElement {
@@ -544,8 +538,3 @@ impl FromStr for PicXMLElement {
     }
 }
 
-pub trait ElementReader {
-    fn read<R: Read>(r: &mut EventReader<R>, attrs: &[OwnedAttribute]) -> Result<Self, ReaderError>
-    where
-        Self: std::marker::Sized;
-}

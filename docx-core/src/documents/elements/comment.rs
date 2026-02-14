@@ -1,5 +1,5 @@
 use serde::ser::{SerializeStruct, Serializer};
-use serde::Serialize;
+use serde::{Deserialize, Deserializer, Serialize};
 use std::io::Write;
 
 use crate::documents::*;
@@ -19,6 +19,57 @@ pub struct Comment {
 pub enum CommentChild {
     Paragraph(Paragraph),
     Table(Table),
+}
+
+// ============================================================================
+// XML Deserialization (quick-xml serde)
+// ============================================================================
+
+#[derive(Deserialize)]
+enum CommentChildXml {
+    #[serde(rename = "p", alias = "w:p")]
+    Paragraph(Paragraph),
+    #[serde(rename = "tbl", alias = "w:tbl")]
+    Table(Table),
+    #[serde(other)]
+    Unknown,
+}
+
+#[derive(Deserialize)]
+struct CommentXml {
+    #[serde(rename = "@id", alias = "@w:id")]
+    id: usize,
+    #[serde(rename = "@author", alias = "@w:author", default)]
+    author: String,
+    #[serde(rename = "@date", alias = "@w:date", default)]
+    date: String,
+    #[serde(rename = "$value", default)]
+    children: Vec<CommentChildXml>,
+}
+
+impl<'de> Deserialize<'de> for Comment {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let xml = CommentXml::deserialize(deserializer)?;
+        let children = xml
+            .children
+            .into_iter()
+            .filter_map(|c| match c {
+                CommentChildXml::Paragraph(p) => Some(CommentChild::Paragraph(p)),
+                CommentChildXml::Table(t) => Some(CommentChild::Table(t)),
+                CommentChildXml::Unknown => None,
+            })
+            .collect();
+        Ok(Comment {
+            id: xml.id,
+            author: xml.author,
+            date: xml.date,
+            children,
+            parent_comment_id: None,
+        })
+    }
 }
 
 impl Serialize for CommentChild {

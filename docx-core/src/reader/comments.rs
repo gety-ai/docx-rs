@@ -1,38 +1,17 @@
-use std::io::Read;
-use std::str::FromStr;
-
-use xml::reader::{EventReader, XmlEvent};
+use quick_xml::de::from_reader;
+use std::io::{BufReader, Read};
 
 use super::*;
+use crate::reader::{FromXML, FromXMLQuickXml, ReaderError};
+
+impl FromXMLQuickXml for Comments {
+    fn from_xml_quick<R: Read>(reader: R) -> Result<Self, ReaderError> {
+        Ok(from_reader(BufReader::new(reader))?)
+    }
+}
 
 impl FromXML for Comments {
     fn from_xml<R: Read>(reader: R) -> Result<Self, ReaderError> {
-        let mut r = EventReader::new(reader);
-        let mut comments: Vec<Comment> = vec![];
-        loop {
-            let e = r.next();
-            match e {
-                Ok(XmlEvent::StartElement {
-                    name, attributes, ..
-                }) => {
-                    let e = XMLElement::from_str(&name.local_name)
-                        .expect("should convert to XMLElement");
-                    if let XMLElement::Comment = e {
-                        comments.push(Comment::read(&mut r, &attributes)?);
-                    }
-                }
-                Ok(XmlEvent::EndElement { name, .. }) => {
-                    let e = XMLElement::from_str(&name.local_name).unwrap();
-                    if e == XMLElement::Comments {
-                        return Ok(Comments { comments });
-                    }
-                }
-                Ok(XmlEvent::EndDocument { .. }) => {
-                    return Ok(Comments { comments });
-                }
-                Err(_) => return Err(ReaderError::XMLReadError),
-                _ => {}
-            }
-        }
+        Self::from_xml_quick(reader)
     }
 }

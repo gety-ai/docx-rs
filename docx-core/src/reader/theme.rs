@@ -1,36 +1,18 @@
-use std::io::Read;
-use std::str::FromStr;
+use quick_xml::de::from_reader;
+use std::io::{BufReader, Read};
 
-use crate::reader::*;
-use xml::reader::{EventReader, XmlEvent};
+use crate::reader::{FromXML, FromXMLQuickXml, ReaderError};
+
+use super::*;
+
+impl FromXMLQuickXml for Theme {
+    fn from_xml_quick<R: Read>(reader: R) -> Result<Self, ReaderError> {
+        Ok(from_reader(BufReader::new(reader))?)
+    }
+}
 
 impl FromXML for Theme {
     fn from_xml<R: Read>(reader: R) -> Result<Self, ReaderError> {
-        let mut parser = EventReader::new(reader);
-        let mut theme = Self::default();
-        loop {
-            let e = parser.next();
-            match e {
-                Ok(XmlEvent::StartElement {
-                    attributes, name, ..
-                }) => {
-                    let e = AXMLElement::from_str(&name.local_name).unwrap();
-                    #[allow(clippy::single_match)]
-                    match e {
-                        AXMLElement::FontScheme => {
-                            if let Ok(f) = FontScheme::read(&mut parser, &attributes) {
-                                theme.font_schema = f;
-                            }
-                            continue;
-                        }
-                        _ => {}
-                    }
-                }
-                Ok(XmlEvent::EndDocument) => break,
-                Err(_) => return Err(ReaderError::XMLReadError),
-                _ => {}
-            }
-        }
-        Ok(theme)
+        Self::from_xml_quick(reader)
     }
 }

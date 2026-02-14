@@ -27,7 +27,6 @@ mod from_xml_quick;
 mod header;
 mod header_or_footer_rels;
 mod hyperlink;
-mod ignore;
 mod insert;
 mod level;
 mod level_override;

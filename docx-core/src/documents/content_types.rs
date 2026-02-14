@@ -1,10 +1,9 @@
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
-use std::io::{Read, Write};
-use xml::reader::{EventReader, XmlEvent};
+use std::io::{BufReader, Read, Write};
 
 use crate::documents::BuildXML;
-use crate::reader::{FromXML, ReaderError};
+use crate::reader::{FromXML, FromXMLQuickXml, ReaderError};
 use crate::xml_builder::*;
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
@@ -176,29 +175,51 @@ impl BuildXML for ContentTypes {
     }
 }
 
-impl FromXML for ContentTypes {
-    fn from_xml<R: Read>(reader: R) -> Result<Self, ReaderError> {
-        let parser = EventReader::new(reader);
+// ============================================================================
+// XML Deserialization (quick-xml serde)
+// ============================================================================
+
+#[derive(Deserialize)]
+struct OverrideXml {
+    #[serde(rename = "@ContentType", default)]
+    content_type: String,
+    #[serde(rename = "@PartName", default)]
+    part_name: String,
+}
+
+#[derive(Deserialize)]
+enum ContentTypesChildXml {
+    Override(OverrideXml),
+    Default(OverrideXml),
+    #[serde(other)]
+    Unknown,
+}
+
+#[derive(Deserialize)]
+struct ContentTypesXml {
+    #[serde(rename = "$value", default)]
+    children: Vec<ContentTypesChildXml>,
+}
+
+impl FromXMLQuickXml for ContentTypes {
+    fn from_xml_quick<R: Read>(reader: R) -> Result<Self, ReaderError> {
+        let xml: ContentTypesXml = quick_xml::de::from_reader(BufReader::new(reader))?;
         let mut s = Self::default();
-        let mut depth = 0;
-        for e in parser {
-            match e {
-                Ok(XmlEvent::StartElement { attributes, .. }) => {
-                    if depth == 1 {
-                        let namespace = attributes[0].value.clone();
-                        let path = attributes[1].value.clone();
-                        s = s.add_content(path, namespace);
-                    }
-                    depth += 1;
+        for child in xml.children {
+            match child {
+                ContentTypesChildXml::Override(o) => {
+                    s = s.add_content(o.part_name, o.content_type);
                 }
-                Ok(XmlEvent::EndElement { .. }) => {
-                    depth -= 1;
-                }
-                Err(_) => {}
                 _ => {}
             }
         }
         Ok(s)
+    }
+}
+
+impl FromXML for ContentTypes {
+    fn from_xml<R: Read>(reader: R) -> Result<Self, ReaderError> {
+        Self::from_xml_quick(reader)
     }
 }
 

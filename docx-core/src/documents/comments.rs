@@ -3,12 +3,34 @@ use crate::documents::BuildXML;
 use crate::xml_builder::*;
 use std::io::Write;
 
-use serde::Serialize;
+use serde::{Deserialize, Deserializer, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct Comments {
     pub(crate) comments: Vec<Comment>,
+}
+
+// ============================================================================
+// XML Deserialization (quick-xml serde)
+// ============================================================================
+
+#[derive(Deserialize)]
+struct CommentsXml {
+    #[serde(rename = "$value", default)]
+    comments: Vec<Comment>,
+}
+
+impl<'de> Deserialize<'de> for Comments {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let xml = CommentsXml::deserialize(deserializer)?;
+        Ok(Comments {
+            comments: xml.comments,
+        })
+    }
 }
 
 impl Comments {

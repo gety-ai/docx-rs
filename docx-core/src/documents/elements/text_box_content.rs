@@ -1,6 +1,6 @@
 use super::*;
 use serde::ser::{SerializeStruct, Serializer};
-use serde::Serialize;
+use serde::{Deserialize, Deserializer, Serialize};
 use std::io::Write;
 
 use crate::documents::BuildXML;
@@ -16,6 +16,59 @@ pub struct TextBoxContent {
 pub enum TextBoxContentChild {
     Paragraph(Box<Paragraph>),
     Table(Box<Table>),
+}
+
+// ============================================================================
+// XML Deserialization (quick-xml serde)
+// ============================================================================
+
+#[derive(Deserialize)]
+enum TextBoxContentChildXml {
+    #[serde(rename = "p", alias = "w:p")]
+    Paragraph(Paragraph),
+    #[serde(rename = "tbl", alias = "w:tbl")]
+    Table(Table),
+    #[serde(other)]
+    Unknown,
+}
+
+#[derive(Deserialize)]
+struct TextBoxContentXml {
+    #[serde(rename = "$value", default)]
+    children: Vec<TextBoxContentChildXml>,
+}
+
+impl<'de> Deserialize<'de> for TextBoxContent {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let xml = TextBoxContentXml::deserialize(deserializer)?;
+        let mut has_numbering = false;
+        let children = xml
+            .children
+            .into_iter()
+            .filter_map(|c| match c {
+                TextBoxContentChildXml::Paragraph(p) => {
+                    if p.has_numbering {
+                        has_numbering = true;
+                    }
+                    Some(TextBoxContentChild::Paragraph(Box::new(p)))
+                }
+                TextBoxContentChildXml::Table(t) => {
+                    if t.has_numbering {
+                        has_numbering = true;
+                    }
+                    Some(TextBoxContentChild::Table(Box::new(t)))
+                }
+                TextBoxContentChildXml::Unknown => None,
+            })
+            .collect();
+        Ok(TextBoxContent {
+            children,
+            has_numbering,
+        })
+    }
 }
 
 impl Serialize for TextBoxContentChild {

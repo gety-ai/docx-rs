@@ -1,56 +1,71 @@
-use std::io::Read;
-use std::str::FromStr;
-
-use xml::reader::{EventReader, XmlEvent};
+use serde::Deserialize;
+use std::io::{BufReader, Read};
 
 use super::*;
+use crate::reader::{FromXML, FromXMLQuickXml, ReaderError};
 
-impl FromXML for CustomProps {
-    fn from_xml<R: Read>(reader: R) -> Result<Self, ReaderError> {
-        let mut r = EventReader::new(reader);
-        // TODO: Fow now, support only string.
+// ============================================================================
+// XML Deserialization DTOs (quick-xml serde)
+// ============================================================================
+
+#[derive(Deserialize, Default)]
+struct LpwstrXml {
+    #[serde(rename = "$text", default)]
+    text: String,
+}
+
+#[derive(Deserialize)]
+enum PropertyChildXml {
+    #[serde(rename = "lpwstr", alias = "vt:lpwstr")]
+    Lpwstr(LpwstrXml),
+    #[serde(other)]
+    Unknown,
+}
+
+#[derive(Deserialize)]
+struct PropertyXml {
+    #[serde(rename = "@name", default)]
+    name: String,
+    #[serde(rename = "$value", default)]
+    children: Vec<PropertyChildXml>,
+}
+
+#[derive(Deserialize)]
+enum PropertiesChildXml {
+    #[serde(rename = "property")]
+    Property(PropertyXml),
+    #[serde(other)]
+    Unknown,
+}
+
+#[derive(Deserialize)]
+struct PropertiesXml {
+    #[serde(rename = "$value", default)]
+    children: Vec<PropertiesChildXml>,
+}
+
+impl FromXMLQuickXml for CustomProps {
+    fn from_xml_quick<R: Read>(reader: R) -> Result<Self, ReaderError> {
+        let xml: PropertiesXml = quick_xml::de::from_reader(BufReader::new(reader))?;
         let mut props = CustomProps::new();
-        loop {
-            let e = r.next();
-            match e {
-                Ok(XmlEvent::StartElement {
-                    name, attributes, ..
-                }) => {
-                    if let Ok(XMLElement::Property) = XMLElement::from_str(&name.local_name) {
-                        if let Some(key) = read_name(&attributes) {
-                            loop {
-                                let e = r.next();
-                                match e {
-                                    Ok(XmlEvent::StartElement { name, .. }) => {
-                                        // TODO: Fow now, support only string.
-                                        if let Ok(VtXMLElement::Lpwstr) =
-                                            VtXMLElement::from_str(&name.local_name)
-                                        {
-                                            let e = r.next();
-                                            if let Ok(XmlEvent::Characters(c)) = e {
-                                                props = props.add_custom_property(&key, c)
-                                            }
-                                        }
-                                    }
-                                    Ok(XmlEvent::EndElement { name, .. }) => {
-                                        if let Ok(XMLElement::Property) =
-                                            XMLElement::from_str(&name.local_name)
-                                        {
-                                            break;
-                                        }
-                                    }
-                                    _ => {}
-                                }
-                            }
+        for child in xml.children {
+            if let PropertiesChildXml::Property(p) = child {
+                if !p.name.is_empty() {
+                    for pc in p.children {
+                        if let PropertyChildXml::Lpwstr(v) = pc {
+                            props = props.add_custom_property(&p.name, v.text);
+                            break;
                         }
                     }
                 }
-                Ok(XmlEvent::EndDocument { .. }) => {
-                    return Ok(props);
-                }
-                Err(_) => return Err(ReaderError::XMLReadError),
-                _ => {}
             }
         }
+        Ok(props)
+    }
+}
+
+impl FromXML for CustomProps {
+    fn from_xml<R: Read>(reader: R) -> Result<Self, ReaderError> {
+        Self::from_xml_quick(reader)
     }
 }
