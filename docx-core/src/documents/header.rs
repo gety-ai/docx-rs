@@ -1,10 +1,68 @@
+use serde::de::IgnoredAny;
 use serde::ser::{SerializeStruct, Serializer};
-use serde::Serialize;
+use serde::{Deserialize, Deserializer, Serialize};
 use std::io::Write;
 
 use super::*;
 use crate::documents::BuildXML;
 use crate::xml_builder::*;
+
+// ============================================================================
+// XML Deserialization Helper Structures (for quick-xml serde)
+// ============================================================================
+
+#[derive(Debug, Deserialize, Default)]
+struct HeaderXml {
+    #[serde(rename = "$value", default)]
+    children: Vec<HeaderChildXml>,
+}
+
+#[derive(Debug, Deserialize)]
+enum HeaderChildXml {
+    #[serde(rename = "p", alias = "w:p")]
+    Paragraph(Paragraph),
+    #[serde(rename = "tbl", alias = "w:tbl")]
+    Table(Table),
+    #[serde(rename = "sdt", alias = "w:sdt")]
+    StructuredDataTag(IgnoredAny),
+    #[serde(other)]
+    Unknown,
+}
+
+fn header_child_from_xml(xml: HeaderChildXml) -> Option<HeaderChild> {
+    match xml {
+        HeaderChildXml::Paragraph(p) => Some(HeaderChild::Paragraph(Box::new(p))),
+        HeaderChildXml::Table(t) => Some(HeaderChild::Table(Box::new(t))),
+        HeaderChildXml::StructuredDataTag(_) | HeaderChildXml::Unknown => None,
+    }
+}
+
+impl<'de> Deserialize<'de> for Header {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let xml = HeaderXml::deserialize(deserializer)?;
+        let mut children = Vec::new();
+        let mut has_numbering = false;
+
+        for child in xml.children {
+            if let Some(child) = header_child_from_xml(child) {
+                if matches!(&child, HeaderChild::Paragraph(p) if p.has_numbering)
+                    || matches!(&child, HeaderChild::Table(t) if t.has_numbering)
+                {
+                    has_numbering = true;
+                }
+                children.push(child);
+            }
+        }
+
+        Ok(Header {
+            has_numbering,
+            children,
+        })
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Serialize, Default)]
 #[serde(rename_all = "camelCase")]

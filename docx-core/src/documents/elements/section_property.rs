@@ -4,8 +4,10 @@ use crate::types::*;
 use crate::xml_builder::*;
 use crate::{Footer, Header};
 use std::io::Write;
+use std::str::FromStr;
 
-use serde::Serialize;
+use serde::de::IgnoredAny;
+use serde::{Deserialize, Deserializer, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -46,6 +48,250 @@ pub struct SectionProperty {
     pub section_type: Option<SectionType>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub page_num_type: Option<PageNumType>,
+}
+
+// ============================================================================
+// XML Deserialization Helper Structures (for quick-xml serde)
+// ============================================================================
+
+#[derive(Debug, Deserialize, Default)]
+struct XmlValueAttrSP {
+    #[serde(rename = "@val", alias = "@w:val", default)]
+    val: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+struct SectionPropertyXml {
+    #[serde(rename = "$value", default)]
+    children: Vec<SectionPropertyChildXml>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+struct SectionPageSizeXml {
+    #[serde(rename = "@w", alias = "@w:w", default)]
+    w: Option<String>,
+    #[serde(rename = "@h", alias = "@w:h", default)]
+    h: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+struct SectionPageMarginXml {
+    #[serde(rename = "@top", alias = "@w:top", default)]
+    top: Option<String>,
+    #[serde(rename = "@right", alias = "@w:right", default)]
+    right: Option<String>,
+    #[serde(rename = "@bottom", alias = "@w:bottom", default)]
+    bottom: Option<String>,
+    #[serde(rename = "@left", alias = "@w:left", default)]
+    left: Option<String>,
+    #[serde(rename = "@header", alias = "@w:header", default)]
+    header: Option<String>,
+    #[serde(rename = "@footer", alias = "@w:footer", default)]
+    footer: Option<String>,
+    #[serde(rename = "@gutter", alias = "@w:gutter", default)]
+    gutter: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+struct SectionDocGridXml {
+    #[serde(rename = "@type", alias = "@w:type", default)]
+    grid_type: Option<String>,
+    #[serde(rename = "@linePitch", alias = "@w:linePitch", default)]
+    line_pitch: Option<String>,
+    #[serde(rename = "@charSpace", alias = "@w:charSpace", default)]
+    char_space: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+struct SectionPageNumTypeXml {
+    #[serde(rename = "@start", alias = "@w:start", default)]
+    start: Option<String>,
+    #[serde(rename = "@chapStyle", alias = "@w:chapStyle", default)]
+    chap_style: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+struct SectionReferenceXml {
+    #[serde(rename = "@type", alias = "@w:type", default)]
+    ref_type: Option<String>,
+    #[serde(rename = "@id", alias = "@w:id", alias = "@r:id", default)]
+    id: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+enum SectionPropertyChildXml {
+    #[serde(rename = "pgMar", alias = "w:pgMar")]
+    PageMargin(SectionPageMarginXml),
+    #[serde(rename = "pgSz", alias = "w:pgSz")]
+    PageSize(SectionPageSizeXml),
+    #[serde(rename = "docGrid", alias = "w:docGrid")]
+    DocGrid(SectionDocGridXml),
+    #[serde(rename = "pgNumType", alias = "w:pgNumType")]
+    PageNumType(SectionPageNumTypeXml),
+    #[serde(rename = "headerReference", alias = "w:headerReference")]
+    HeaderReference(SectionReferenceXml),
+    #[serde(rename = "footerReference", alias = "w:footerReference")]
+    FooterReference(SectionReferenceXml),
+    #[serde(rename = "type", alias = "w:type")]
+    SectionType(XmlValueAttrSP),
+    #[serde(rename = "titlePg", alias = "w:titlePg")]
+    TitlePg(IgnoredAny),
+    #[serde(other)]
+    Unknown,
+}
+
+fn parse_dxa_i32(raw: Option<String>) -> Option<i32> {
+    let raw = raw?;
+    let raw = raw.trim();
+    if let Some(v) = raw.strip_suffix("pt") {
+        v.parse::<f64>().ok().map(|n| (n * 20.0) as i32)
+    } else {
+        raw.parse::<f64>().ok().map(|n| n as i32)
+    }
+}
+
+fn parse_dxa_u32(raw: Option<String>) -> Option<u32> {
+    parse_dxa_i32(raw).and_then(|v| if v >= 0 { Some(v as u32) } else { None })
+}
+
+fn parse_doc_grid(xml: SectionDocGridXml) -> Option<DocGrid> {
+    let mut doc_grid = DocGrid::with_empty();
+
+    if let Some(grid_type) = xml.grid_type {
+        if let Ok(t) = DocGridType::from_str(&grid_type) {
+            doc_grid = doc_grid.grid_type(t);
+        }
+    }
+    if let Some(line_pitch) = xml.line_pitch {
+        if let Ok(lp) = line_pitch.parse::<f32>() {
+            doc_grid = doc_grid.line_pitch(lp as usize);
+        }
+    }
+    if let Some(char_space) = xml.char_space {
+        if let Ok(cs) = char_space.parse::<f32>() {
+            doc_grid = doc_grid.char_space(cs as isize);
+        }
+    }
+
+    Some(doc_grid)
+}
+
+fn parse_page_num_type(xml: SectionPageNumTypeXml) -> PageNumType {
+    let mut p = PageNumType::new();
+    if let Some(start) = xml.start.and_then(|v| v.parse::<u32>().ok()) {
+        p = p.start(start);
+    }
+    if let Some(chap_style) = xml.chap_style {
+        p = p.chap_style(chap_style);
+    }
+    p
+}
+
+impl<'de> Deserialize<'de> for SectionProperty {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let xml = SectionPropertyXml::deserialize(deserializer)?;
+        let mut sp = SectionProperty::new();
+
+        for child in xml.children {
+            match child {
+                SectionPropertyChildXml::PageMargin(v) => {
+                    let mut margin = PageMargin::new();
+                    if let Some(top) = parse_dxa_i32(v.top) {
+                        margin = margin.top(top);
+                    }
+                    if let Some(right) = parse_dxa_i32(v.right) {
+                        margin = margin.right(right);
+                    }
+                    if let Some(bottom) = parse_dxa_i32(v.bottom) {
+                        margin = margin.bottom(bottom);
+                    }
+                    if let Some(left) = parse_dxa_i32(v.left) {
+                        margin = margin.left(left);
+                    }
+                    if let Some(header) = parse_dxa_i32(v.header) {
+                        margin = margin.header(header);
+                    }
+                    if let Some(footer) = parse_dxa_i32(v.footer) {
+                        margin = margin.footer(footer);
+                    }
+                    if let Some(gutter) = parse_dxa_i32(v.gutter) {
+                        margin = margin.gutter(gutter);
+                    }
+                    sp = sp.page_margin(margin);
+                }
+                SectionPropertyChildXml::PageSize(v) => {
+                    let mut size = PageSize::new();
+                    if let Some(w) = parse_dxa_u32(v.w) {
+                        size = size.width(w);
+                    }
+                    if let Some(h) = parse_dxa_u32(v.h) {
+                        size = size.height(h);
+                    }
+                    sp = sp.page_size(size);
+                }
+                SectionPropertyChildXml::DocGrid(v) => {
+                    if let Some(doc_grid) = parse_doc_grid(v) {
+                        sp = sp.doc_grid(doc_grid);
+                    }
+                }
+                SectionPropertyChildXml::PageNumType(v) => {
+                    sp = sp.page_num_type(parse_page_num_type(v));
+                }
+                SectionPropertyChildXml::HeaderReference(v) => {
+                    let rid = v.id.unwrap_or_default();
+                    let header_type = v.ref_type.unwrap_or_else(|| "default".to_string());
+                    match header_type.as_str() {
+                        "default" => {
+                            sp.header_reference =
+                                Some(HeaderReference::new(header_type, rid))
+                        }
+                        "first" => {
+                            sp.first_header_reference =
+                                Some(HeaderReference::new(header_type, rid))
+                        }
+                        "even" => {
+                            sp.even_header_reference =
+                                Some(HeaderReference::new(header_type, rid))
+                        }
+                        _ => {}
+                    }
+                }
+                SectionPropertyChildXml::FooterReference(v) => {
+                    let rid = v.id.unwrap_or_default();
+                    let footer_type = v.ref_type.unwrap_or_else(|| "default".to_string());
+                    match footer_type.as_str() {
+                        "default" => {
+                            sp.footer_reference =
+                                Some(FooterReference::new(footer_type, rid))
+                        }
+                        "first" => {
+                            sp.first_footer_reference =
+                                Some(FooterReference::new(footer_type, rid))
+                        }
+                        "even" => {
+                            sp.even_footer_reference =
+                                Some(FooterReference::new(footer_type, rid))
+                        }
+                        _ => {}
+                    }
+                }
+                SectionPropertyChildXml::SectionType(v) => {
+                    if let Some(val) = v.val {
+                        if let Ok(section_type) = SectionType::from_str(&val) {
+                            sp.section_type = Some(section_type);
+                        }
+                    }
+                }
+                SectionPropertyChildXml::TitlePg(_) => sp = sp.title_pg(),
+                SectionPropertyChildXml::Unknown => {}
+            }
+        }
+
+        Ok(sp)
+    }
 }
 
 impl SectionProperty {

@@ -54,7 +54,7 @@ enum DocumentChildXml {
     #[serde(rename = "sdt", alias = "w:sdt")]
     StructuredDataTag(IgnoredAny),
     #[serde(rename = "sectPr", alias = "w:sectPr")]
-    SectionProperty(IgnoredAny),
+    SectionProperty(SectionProperty),
     #[serde(other)]
     Unknown,
 }
@@ -86,9 +86,8 @@ fn document_child_from_xml(xml: DocumentChildXml) -> Option<DocumentChild> {
             let id = parse_optional_usize_doc(node.id)?;
             Some(DocumentChild::CommentEnd(CommentRangeEnd::new(id)))
         }
-        DocumentChildXml::StructuredDataTag(_)
-        | DocumentChildXml::SectionProperty(_)
-        | DocumentChildXml::Unknown => None,
+        DocumentChildXml::StructuredDataTag(_) | DocumentChildXml::Unknown => None,
+        DocumentChildXml::SectionProperty(_) => None, // handled separately
     }
 }
 
@@ -108,29 +107,37 @@ impl<'de> Deserialize<'de> for Document {
         let xml = DocumentXml::deserialize(deserializer)?;
         let mut children = Vec::new();
         let mut has_numbering = false;
+        let mut section_property = SectionProperty::new();
 
         for child in xml.body.children {
-            if let Some(mapped) = document_child_from_xml(child) {
-                match &mapped {
-                    DocumentChild::Paragraph(p) => {
-                        if p.has_numbering {
-                            has_numbering = true;
-                        }
-                    }
-                    DocumentChild::Table(t) => {
-                        if t.has_numbering {
-                            has_numbering = true;
-                        }
-                    }
-                    _ => {}
+            match child {
+                DocumentChildXml::SectionProperty(sp) => {
+                    section_property = sp;
                 }
-                children.push(mapped);
+                other => {
+                    if let Some(mapped) = document_child_from_xml(other) {
+                        match &mapped {
+                            DocumentChild::Paragraph(p) => {
+                                if p.has_numbering {
+                                    has_numbering = true;
+                                }
+                            }
+                            DocumentChild::Table(t) => {
+                                if t.has_numbering {
+                                    has_numbering = true;
+                                }
+                            }
+                            _ => {}
+                        }
+                        children.push(mapped);
+                    }
+                }
             }
         }
 
         Ok(Document {
             children,
-            section_property: SectionProperty::new(),
+            section_property,
             has_numbering,
         })
     }

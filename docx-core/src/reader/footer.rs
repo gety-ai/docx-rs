@@ -1,50 +1,18 @@
-use std::io::Read;
-use std::str::FromStr;
+use quick_xml::de::from_reader;
+use std::io::{BufReader, Read};
 
-use crate::reader::*;
-use xml::reader::{EventReader, XmlEvent};
+use super::*;
+use crate::reader::{FromXML, FromXMLQuickXml, ReaderError};
 
-use super::{Paragraph, Table};
+impl FromXMLQuickXml for Footer {
+    fn from_xml_quick<R: Read>(reader: R) -> Result<Self, ReaderError> {
+        Ok(from_reader(BufReader::new(reader))?)
+    }
+}
 
 impl FromXML for Footer {
     fn from_xml<R: Read>(reader: R) -> Result<Self, ReaderError> {
-        let mut parser = EventReader::new(reader);
-        let mut footer = Self::default();
-        loop {
-            let e = parser.next();
-            match e {
-                Ok(XmlEvent::StartElement {
-                    attributes, name, ..
-                }) => {
-                    let e = XMLElement::from_str(&name.local_name).unwrap();
-                    match e {
-                        XMLElement::Paragraph => {
-                            if let Ok(p) = Paragraph::read(&mut parser, &attributes) {
-                                footer = footer.add_paragraph(p);
-                            }
-                            continue;
-                        }
-                        XMLElement::Table => {
-                            if let Ok(t) = Table::read(&mut parser, &attributes) {
-                                footer = footer.add_table(t);
-                            }
-                            continue;
-                        }
-                        XMLElement::StructuredDataTag => {
-                            if let Ok(tag) = StructuredDataTag::read(&mut parser, &attributes) {
-                                footer = footer.add_structured_data_tag(tag);
-                            }
-                            continue;
-                        }
-                        _ => {}
-                    }
-                }
-                Ok(XmlEvent::EndDocument) => break,
-                Err(_) => return Err(ReaderError::XMLReadError),
-                _ => {}
-            }
-        }
-        Ok(footer)
+        Self::from_xml_quick(reader)
     }
 }
 

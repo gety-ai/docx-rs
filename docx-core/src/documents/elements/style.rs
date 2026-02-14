@@ -48,34 +48,113 @@ pub(crate) struct RunFontsXml {
     pub hint: Option<String>,
 }
 
-#[derive(Debug, Deserialize, Default, Clone)]
+// Internal wrapper for deserializing rPr with potentially duplicate elements
+#[derive(Debug, Deserialize, Default)]
+struct RunPropertyXmlRaw {
+    #[serde(rename = "$value", default)]
+    children: Vec<RunPropertyChildXml>,
+}
+
+#[derive(Debug, Deserialize)]
+enum RunPropertyChildXml {
+    #[serde(rename = "rStyle", alias = "w:rStyle")]
+    Style(XmlValueAttr),
+    #[serde(rename = "sz", alias = "w:sz")]
+    Size(XmlValueAttr),
+    #[serde(rename = "color", alias = "w:color")]
+    Color(XmlValueAttr),
+    #[serde(rename = "highlight", alias = "w:highlight")]
+    Highlight(XmlValueAttr),
+    #[serde(rename = "spacing", alias = "w:spacing")]
+    Spacing(XmlValueAttr),
+    #[serde(rename = "rFonts", alias = "w:rFonts")]
+    Fonts(RunFontsXml),
+    #[serde(rename = "u", alias = "w:u")]
+    Underline(XmlValueAttr),
+    #[serde(rename = "b", alias = "w:b")]
+    Bold(XmlOnOffAttr),
+    #[serde(rename = "bCs", alias = "w:bCs")]
+    BoldCs(XmlOnOffAttr),
+    #[serde(rename = "i", alias = "w:i")]
+    Italic(XmlOnOffAttr),
+    #[serde(rename = "iCs", alias = "w:iCs")]
+    ItalicCs(XmlOnOffAttr),
+    #[serde(rename = "strike", alias = "w:strike")]
+    Strike(XmlOnOffAttr),
+    #[serde(rename = "dstrike", alias = "w:dstrike")]
+    Dstrike(XmlOnOffAttr),
+    #[serde(rename = "vanish", alias = "w:vanish")]
+    Vanish(XmlOnOffAttr),
+    #[serde(rename = "specVanish", alias = "w:specVanish")]
+    SpecVanish(XmlOnOffAttr),
+    #[serde(other)]
+    Unknown,
+}
+
+#[derive(Debug, Default, Clone)]
 pub(crate) struct RunPropertyXml {
-    #[serde(rename = "rStyle", alias = "w:rStyle", default)]
     pub style: Option<XmlValueAttr>,
-    #[serde(rename = "sz", alias = "w:sz", default)]
     pub size: Option<XmlValueAttr>,
-    #[serde(rename = "color", alias = "w:color", default)]
     pub color: Option<XmlValueAttr>,
-    #[serde(rename = "highlight", alias = "w:highlight", default)]
     pub highlight: Option<XmlValueAttr>,
-    #[serde(rename = "spacing", alias = "w:spacing", default)]
     pub spacing: Option<XmlValueAttr>,
-    #[serde(rename = "rFonts", alias = "w:rFonts", default)]
     pub fonts: Option<RunFontsXml>,
-    #[serde(rename = "u", alias = "w:u", default)]
     pub underline: Option<XmlValueAttr>,
-    #[serde(rename = "b", alias = "w:b", default)]
     pub bold: Option<XmlOnOffAttr>,
-    #[serde(rename = "i", alias = "w:i", default)]
+    pub bold_cs: Option<XmlOnOffAttr>,
     pub italic: Option<XmlOnOffAttr>,
-    #[serde(rename = "strike", alias = "w:strike", default)]
+    pub italic_cs: Option<XmlOnOffAttr>,
     pub strike: Option<XmlOnOffAttr>,
-    #[serde(rename = "dstrike", alias = "w:dstrike", default)]
     pub dstrike: Option<XmlOnOffAttr>,
-    #[serde(rename = "vanish", alias = "w:vanish", default)]
     pub vanish: Option<XmlOnOffAttr>,
-    #[serde(rename = "specVanish", alias = "w:specVanish", default)]
     pub spec_vanish: Option<XmlOnOffAttr>,
+}
+
+impl<'de> Deserialize<'de> for RunPropertyXml {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let raw = RunPropertyXmlRaw::deserialize(deserializer)?;
+        let mut result = RunPropertyXml::default();
+
+        for child in raw.children {
+            match child {
+                RunPropertyChildXml::Style(v) if result.style.is_none() => result.style = Some(v),
+                RunPropertyChildXml::Size(v) if result.size.is_none() => result.size = Some(v),
+                RunPropertyChildXml::Color(v) if result.color.is_none() => result.color = Some(v),
+                RunPropertyChildXml::Highlight(v) if result.highlight.is_none() => {
+                    result.highlight = Some(v)
+                }
+                RunPropertyChildXml::Spacing(v) if result.spacing.is_none() => {
+                    result.spacing = Some(v)
+                }
+                RunPropertyChildXml::Fonts(v) if result.fonts.is_none() => result.fonts = Some(v),
+                RunPropertyChildXml::Underline(v) if result.underline.is_none() => {
+                    result.underline = Some(v)
+                }
+                RunPropertyChildXml::Bold(v) if result.bold.is_none() => result.bold = Some(v),
+                RunPropertyChildXml::BoldCs(v) if result.bold_cs.is_none() => {
+                    result.bold_cs = Some(v)
+                }
+                RunPropertyChildXml::Italic(v) if result.italic.is_none() => result.italic = Some(v),
+                RunPropertyChildXml::ItalicCs(v) if result.italic_cs.is_none() => {
+                    result.italic_cs = Some(v)
+                }
+                RunPropertyChildXml::Strike(v) if result.strike.is_none() => result.strike = Some(v),
+                RunPropertyChildXml::Dstrike(v) if result.dstrike.is_none() => {
+                    result.dstrike = Some(v)
+                }
+                RunPropertyChildXml::Vanish(v) if result.vanish.is_none() => result.vanish = Some(v),
+                RunPropertyChildXml::SpecVanish(v) if result.spec_vanish.is_none() => {
+                    result.spec_vanish = Some(v)
+                }
+                _ => {} // Ignore duplicates and unknown elements
+            }
+        }
+
+        Ok(result)
+    }
 }
 
 #[derive(Debug, Deserialize, Default, Clone)]
