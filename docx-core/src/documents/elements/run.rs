@@ -93,7 +93,7 @@ enum RunChildXml {
     #[serde(rename = "br", alias = "w:br")]
     Break(XmlBreakNode),
     #[serde(rename = "drawing", alias = "w:drawing")]
-    Drawing(IgnoredAny),
+    Drawing(Drawing),
     #[serde(rename = "pict", alias = "w:pict")]
     Pict(IgnoredAny),
     #[serde(rename = "shape", alias = "v:shape", alias = "w:shape")]
@@ -165,8 +165,16 @@ fn run_child_from_xml(xml: RunChildXml) -> Option<RunChild> {
                 .unwrap_or(BreakType::TextWrapping);
             Some(RunChild::Break(Break::new(break_type)))
         }
-        RunChildXml::Drawing(_) | RunChildXml::Pict(_) => {
-            // Drawing/Pict are complex - skip for now (parsed separately via ElementReader)
+        RunChildXml::Drawing(drawing) => {
+            // Only accept Pic drawings for now; TextBox writer path is not implemented yet.
+            if matches!(drawing.data.as_ref(), Some(DrawingData::Pic(_))) {
+                Some(RunChild::Drawing(Box::new(drawing)))
+            } else {
+                None
+            }
+        }
+        RunChildXml::Pict(_) => {
+            // Legacy VML pict is not mapped to Drawing yet.
             None
         }
         RunChildXml::Shape(_) => {
