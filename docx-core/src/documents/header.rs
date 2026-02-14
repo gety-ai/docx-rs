@@ -1,4 +1,3 @@
-use serde::de::IgnoredAny;
 use serde::ser::{SerializeStruct, Serializer};
 use serde::{Deserialize, Deserializer, Serialize};
 use std::io::Write;
@@ -24,7 +23,7 @@ enum HeaderChildXml {
     #[serde(rename = "tbl", alias = "w:tbl")]
     Table(Table),
     #[serde(rename = "sdt", alias = "w:sdt")]
-    StructuredDataTag(IgnoredAny),
+    StructuredDataTag(StructuredDataTag),
     #[serde(other)]
     Unknown,
 }
@@ -33,7 +32,10 @@ fn header_child_from_xml(xml: HeaderChildXml) -> Option<HeaderChild> {
     match xml {
         HeaderChildXml::Paragraph(p) => Some(HeaderChild::Paragraph(Box::new(p))),
         HeaderChildXml::Table(t) => Some(HeaderChild::Table(Box::new(t))),
-        HeaderChildXml::StructuredDataTag(_) | HeaderChildXml::Unknown => None,
+        HeaderChildXml::StructuredDataTag(sdt) => {
+            Some(HeaderChild::StructuredDataTag(Box::new(sdt)))
+        }
+        HeaderChildXml::Unknown => None,
     }
 }
 

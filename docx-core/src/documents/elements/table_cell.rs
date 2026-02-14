@@ -92,7 +92,7 @@ enum TableCellChildXml {
     #[serde(rename = "tbl", alias = "w:tbl")]
     Table(Table),
     #[serde(rename = "sdt", alias = "w:sdt")]
-    StructuredDataTag(IgnoredAny),
+    StructuredDataTag(StructuredDataTag),
     #[serde(rename = "tcPr", alias = "w:tcPr")]
     TableCellProperty(IgnoredAny),
     #[serde(other)]
@@ -241,9 +241,10 @@ fn table_cell_child_from_xml(xml: TableCellChildXml) -> Option<TableCellContent>
     match xml {
         TableCellChildXml::Paragraph(p) => Some(TableCellContent::Paragraph(p)),
         TableCellChildXml::Table(t) => Some(TableCellContent::Table(t)),
-        TableCellChildXml::StructuredDataTag(_)
-        | TableCellChildXml::TableCellProperty(_)
-        | TableCellChildXml::Unknown => None,
+        TableCellChildXml::StructuredDataTag(sdt) => {
+            Some(TableCellContent::StructuredDataTag(Box::new(sdt)))
+        }
+        TableCellChildXml::TableCellProperty(_) | TableCellChildXml::Unknown => None,
     }
 }
 
@@ -522,5 +523,31 @@ mod tests {
         assert_eq!(j["property"]["borders"]["top"]["size"], 8);
         assert_eq!(j["property"]["borders"]["top"]["color"], "FF0000");
         assert_eq!(j["property"]["shading"]["fill"], "FFFFFF");
+    }
+
+    #[test]
+    fn test_cell_xml_deserialize_with_sdt() {
+        let xml = r#"<w:tc xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+            <w:tcPr />
+            <w:p />
+            <w:sdt>
+                <w:sdtPr>
+                    <w:alias w:val="TestSDT" />
+                </w:sdtPr>
+                <w:sdtContent>
+                    <w:p />
+                </w:sdtContent>
+            </w:sdt>
+        </w:tc>"#;
+
+        let cell: TableCell = quick_xml::de::from_str(xml).unwrap();
+        assert_eq!(cell.children.len(), 2);
+        assert!(matches!(&cell.children[0], TableCellContent::Paragraph(_)));
+        if let TableCellContent::StructuredDataTag(sdt) = &cell.children[1] {
+            assert_eq!(sdt.property.alias, Some("TestSDT".to_string()));
+            assert_eq!(sdt.children.len(), 1);
+        } else {
+            panic!("Expected StructuredDataTag");
+        }
     }
 }

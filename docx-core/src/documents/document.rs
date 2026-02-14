@@ -1,4 +1,3 @@
-use serde::de::IgnoredAny;
 use serde::ser::{SerializeStruct, Serializer};
 use serde::{Deserialize, Deserializer, Serialize};
 use std::io::Write;
@@ -52,7 +51,7 @@ enum DocumentChildXml {
     #[serde(rename = "commentRangeEnd", alias = "w:commentRangeEnd")]
     CommentEnd(XmlIdNode),
     #[serde(rename = "sdt", alias = "w:sdt")]
-    StructuredDataTag(IgnoredAny),
+    StructuredDataTag(StructuredDataTag),
     #[serde(rename = "sectPr", alias = "w:sectPr")]
     SectionProperty(SectionProperty),
     #[serde(other)]
@@ -86,7 +85,10 @@ fn document_child_from_xml(xml: DocumentChildXml) -> Option<DocumentChild> {
             let id = parse_optional_usize_doc(node.id)?;
             Some(DocumentChild::CommentEnd(CommentRangeEnd::new(id)))
         }
-        DocumentChildXml::StructuredDataTag(_) | DocumentChildXml::Unknown => None,
+        DocumentChildXml::StructuredDataTag(sdt) => {
+            Some(DocumentChild::StructuredDataTag(Box::new(sdt)))
+        }
+        DocumentChildXml::Unknown => None,
         DocumentChildXml::SectionProperty(_) => None, // handled separately
     }
 }

@@ -57,6 +57,17 @@ struct HyperlinkXml {
     children: Vec<HyperlinkChildXml>,
 }
 
+fn parse_history(v: Option<String>) -> Option<usize> {
+    v.and_then(|s| {
+        let s = s.trim().to_lowercase();
+        match s.as_str() {
+            "on" | "true" | "1" => Some(1),
+            "off" | "false" | "0" => Some(0),
+            _ => s.parse::<usize>().ok(),
+        }
+    })
+}
+
 fn parse_optional_usize(v: Option<String>) -> Option<usize> {
     v.and_then(|s| s.parse::<usize>().ok())
 }
@@ -119,12 +130,12 @@ impl<'de> Deserialize<'de> for Hyperlink {
         D: Deserializer<'de>,
     {
         let xml = HyperlinkXml::deserialize(deserializer)?;
-        let link = if let Some(rid) = xml.rid {
+        let link = if let Some(rid) = xml.rid.filter(|s| !s.is_empty()) {
             HyperlinkData::External {
                 rid,
                 path: String::default(),
             }
-        } else if let Some(anchor) = xml.anchor {
+        } else if let Some(anchor) = xml.anchor.filter(|s| !s.is_empty()) {
             HyperlinkData::Anchor { anchor }
         } else {
             HyperlinkData::External {
@@ -135,7 +146,7 @@ impl<'de> Deserialize<'de> for Hyperlink {
 
         Ok(Hyperlink {
             link,
-            history: parse_optional_usize(xml.history),
+            history: parse_history(xml.history),
             children: xml
                 .children
                 .into_iter()
@@ -294,5 +305,43 @@ mod tests {
         ));
         assert_eq!(link.history, Some(1));
         assert_eq!(link.children.len(), 1);
+    }
+
+    #[test]
+    fn test_hyperlink_xml_deserialize_history_on_off() {
+        // Test "on" value
+        let xml_on = r#"<w:hyperlink xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" w:anchor="sec1" w:history="on">
+            <w:r><w:t>link</w:t></w:r>
+        </w:hyperlink>"#;
+        let link_on: Hyperlink = quick_xml::de::from_str(xml_on).unwrap();
+        assert_eq!(link_on.history, Some(1));
+
+        // Test "off" value
+        let xml_off = r#"<w:hyperlink xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" w:anchor="sec2" w:history="off">
+            <w:r><w:t>link</w:t></w:r>
+        </w:hyperlink>"#;
+        let link_off: Hyperlink = quick_xml::de::from_str(xml_off).unwrap();
+        assert_eq!(link_off.history, Some(0));
+
+        // Test "true"/"false"
+        let xml_true = r#"<w:hyperlink xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" w:anchor="sec3" w:history="true">
+            <w:r><w:t>link</w:t></w:r>
+        </w:hyperlink>"#;
+        let link_true: Hyperlink = quick_xml::de::from_str(xml_true).unwrap();
+        assert_eq!(link_true.history, Some(1));
+    }
+
+    #[test]
+    fn test_hyperlink_xml_deserialize_empty_rid() {
+        // Test empty rid falls back to external with empty rid
+        let xml = r#"<w:hyperlink xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" r:id="">
+            <w:r><w:t>link</w:t></w:r>
+        </w:hyperlink>"#;
+        let link: Hyperlink = quick_xml::de::from_str(xml).unwrap();
+        // Empty rid should result in default External with empty rid
+        assert!(matches!(
+            link.link,
+            HyperlinkData::External { ref rid, .. } if rid.is_empty()
+        ));
     }
 }

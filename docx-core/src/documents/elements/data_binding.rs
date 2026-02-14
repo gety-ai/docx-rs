@@ -1,14 +1,42 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::io::Write;
 
 use crate::documents::*;
 use crate::xml_builder::*;
+
+// ============================================================================
+// XML Deserialization Helper Structures (for quick-xml serde)
+// ============================================================================
+
+#[derive(Debug, Deserialize, Default)]
+struct DataBindingXml {
+    #[serde(rename = "@xpath", alias = "@w:xpath", default)]
+    xpath: Option<String>,
+    #[serde(rename = "@prefixMappings", alias = "@w:prefixMappings", default)]
+    prefix_mappings: Option<String>,
+    #[serde(rename = "@storeItemID", alias = "@w:storeItemID", default)]
+    store_item_id: Option<String>,
+}
 
 #[derive(Serialize, Debug, Clone, PartialEq, Default)]
 pub struct DataBinding {
     pub xpath: Option<String>,
     pub prefix_mappings: Option<String>,
     pub store_item_id: Option<String>,
+}
+
+impl<'de> Deserialize<'de> for DataBinding {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let xml = DataBindingXml::deserialize(deserializer)?;
+        Ok(DataBinding {
+            xpath: xml.xpath,
+            prefix_mappings: xml.prefix_mappings,
+            store_item_id: xml.store_item_id,
+        })
+    }
 }
 
 impl DataBinding {
@@ -62,5 +90,17 @@ mod tests {
             str::from_utf8(&b).unwrap(),
             r#"<w:dataBinding w:xpath="root/hello" />"#
         );
+    }
+
+    #[test]
+    fn test_data_binding_xml_deserialize() {
+        let xml = r#"<w:dataBinding xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" w:xpath="root/hello" w:prefixMappings="xmlns:ns0='http://example.com'" w:storeItemID="{12345}" />"#;
+        let binding: DataBinding = quick_xml::de::from_str(xml).unwrap();
+        assert_eq!(binding.xpath, Some("root/hello".to_string()));
+        assert_eq!(
+            binding.prefix_mappings,
+            Some("xmlns:ns0='http://example.com'".to_string())
+        );
+        assert_eq!(binding.store_item_id, Some("{12345}".to_string()));
     }
 }

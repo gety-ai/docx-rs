@@ -1,4 +1,3 @@
-use serde::de::IgnoredAny;
 use serde::ser::{SerializeStruct, Serializer};
 use serde::{Deserialize, Deserializer, Serialize};
 use std::io::Write;
@@ -24,7 +23,7 @@ enum FooterChildXml {
     #[serde(rename = "tbl", alias = "w:tbl")]
     Table(Table),
     #[serde(rename = "sdt", alias = "w:sdt")]
-    StructuredDataTag(IgnoredAny),
+    StructuredDataTag(StructuredDataTag),
     #[serde(other)]
     Unknown,
 }
@@ -33,7 +32,10 @@ fn footer_child_from_xml(xml: FooterChildXml) -> Option<FooterChild> {
     match xml {
         FooterChildXml::Paragraph(p) => Some(FooterChild::Paragraph(Box::new(p))),
         FooterChildXml::Table(t) => Some(FooterChild::Table(Box::new(t))),
-        FooterChildXml::StructuredDataTag(_) | FooterChildXml::Unknown => None,
+        FooterChildXml::StructuredDataTag(sdt) => {
+            Some(FooterChild::StructuredDataTag(Box::new(sdt)))
+        }
+        FooterChildXml::Unknown => None,
     }
 }
 

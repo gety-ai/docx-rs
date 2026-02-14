@@ -1,5 +1,5 @@
 use serde::ser::{SerializeStruct, Serializer};
-use serde::Serialize;
+use serde::{Deserialize, Deserializer, Serialize};
 use std::io::Write;
 
 use super::*;
@@ -7,12 +7,131 @@ use crate::documents::BuildXML;
 // use crate::types::*;
 use crate::xml_builder::*;
 
+// ============================================================================
+// XML Deserialization Helper Structures (for quick-xml serde)
+// ============================================================================
+
+#[derive(Debug, Deserialize, Default)]
+struct XmlBookmarkStartNode {
+    #[serde(rename = "@id", alias = "@w:id", default)]
+    id: Option<String>,
+    #[serde(rename = "@name", alias = "@w:name", default)]
+    name: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+struct XmlIdNode {
+    #[serde(rename = "@id", alias = "@w:id", default)]
+    id: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+enum SdtContentChildXml {
+    #[serde(rename = "r", alias = "w:r")]
+    Run(Run),
+    #[serde(rename = "p", alias = "w:p")]
+    Paragraph(Paragraph),
+    #[serde(rename = "tbl", alias = "w:tbl")]
+    Table(Table),
+    #[serde(rename = "bookmarkStart", alias = "w:bookmarkStart")]
+    BookmarkStart(XmlBookmarkStartNode),
+    #[serde(rename = "bookmarkEnd", alias = "w:bookmarkEnd")]
+    BookmarkEnd(XmlIdNode),
+    #[serde(rename = "commentRangeStart", alias = "w:commentRangeStart")]
+    CommentStart(XmlIdNode),
+    #[serde(rename = "commentRangeEnd", alias = "w:commentRangeEnd")]
+    CommentEnd(XmlIdNode),
+    #[serde(rename = "sdt", alias = "w:sdt")]
+    StructuredDataTag(Box<StructuredDataTag>),
+    #[serde(other)]
+    Unknown,
+}
+
+#[derive(Debug, Deserialize, Default)]
+struct SdtContentXml {
+    #[serde(rename = "$value", default)]
+    children: Vec<SdtContentChildXml>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+struct StructuredDataTagXml {
+    #[serde(rename = "sdtPr", alias = "w:sdtPr", default)]
+    property: Option<StructuredDataTagProperty>,
+    #[serde(rename = "sdtContent", alias = "w:sdtContent", default)]
+    content: Option<SdtContentXml>,
+}
+
+fn parse_optional_usize(v: Option<String>) -> Option<usize> {
+    v.and_then(|s| s.parse::<usize>().ok())
+}
+
+fn sdt_child_from_xml(xml: SdtContentChildXml) -> Option<StructuredDataTagChild> {
+    match xml {
+        SdtContentChildXml::Run(run) => Some(StructuredDataTagChild::Run(Box::new(run))),
+        SdtContentChildXml::Paragraph(p) => {
+            Some(StructuredDataTagChild::Paragraph(Box::new(p)))
+        }
+        SdtContentChildXml::Table(t) => Some(StructuredDataTagChild::Table(Box::new(t))),
+        SdtContentChildXml::BookmarkStart(node) => {
+            let id = parse_optional_usize(node.id)?;
+            let name = node.name?;
+            Some(StructuredDataTagChild::BookmarkStart(BookmarkStart::new(
+                id, name,
+            )))
+        }
+        SdtContentChildXml::BookmarkEnd(node) => {
+            let id = parse_optional_usize(node.id)?;
+            Some(StructuredDataTagChild::BookmarkEnd(BookmarkEnd::new(id)))
+        }
+        SdtContentChildXml::CommentStart(node) => {
+            let id = parse_optional_usize(node.id)?;
+            Some(StructuredDataTagChild::CommentStart(Box::new(
+                CommentRangeStart::new(Comment::new(id)),
+            )))
+        }
+        SdtContentChildXml::CommentEnd(node) => {
+            let id = parse_optional_usize(node.id)?;
+            Some(StructuredDataTagChild::CommentEnd(CommentRangeEnd::new(id)))
+        }
+        SdtContentChildXml::StructuredDataTag(sdt) => {
+            Some(StructuredDataTagChild::StructuredDataTag(sdt))
+        }
+        SdtContentChildXml::Unknown => None,
+    }
+}
+
 #[derive(Serialize, Debug, Clone, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct StructuredDataTag {
     pub children: Vec<StructuredDataTagChild>,
     pub property: StructuredDataTagProperty,
     pub has_numbering: bool,
+}
+
+impl<'de> Deserialize<'de> for StructuredDataTag {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let xml = StructuredDataTagXml::deserialize(deserializer)?;
+        let children: Vec<StructuredDataTagChild> = xml
+            .content
+            .map(|c| c.children.into_iter().filter_map(sdt_child_from_xml).collect())
+            .unwrap_or_default();
+
+        let has_numbering = children.iter().any(|c| match c {
+            StructuredDataTagChild::Paragraph(p) => p.has_numbering,
+            StructuredDataTagChild::Table(t) => t.has_numbering,
+            StructuredDataTagChild::StructuredDataTag(s) => s.has_numbering,
+            _ => false,
+        });
+
+        Ok(StructuredDataTag {
+            children,
+            property: xml.property.unwrap_or_default(),
+            has_numbering,
+        })
+    }
 }
 
 impl Default for StructuredDataTag {
@@ -187,5 +306,51 @@ mod tests {
             str::from_utf8(&b).unwrap(),
             r#"<w:sdt><w:sdtPr><w:rPr /><w:dataBinding w:xpath="root/hello" /></w:sdtPr><w:sdtContent><w:r><w:rPr /><w:t xml:space="preserve">Hello</w:t></w:r></w:sdtContent></w:sdt>"#
         );
+    }
+
+    #[test]
+    fn test_sdt_xml_deserialize() {
+        let xml = r#"<w:sdt xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+            <w:sdtPr>
+                <w:rPr />
+                <w:alias w:val="Test SDT" />
+                <w:dataBinding w:xpath="root/data" />
+            </w:sdtPr>
+            <w:sdtContent>
+                <w:p />
+                <w:r><w:t>Text content</w:t></w:r>
+            </w:sdtContent>
+        </w:sdt>"#;
+
+        let sdt: StructuredDataTag = quick_xml::de::from_str(xml).unwrap();
+        assert_eq!(sdt.property.alias, Some("Test SDT".to_string()));
+        assert!(sdt.property.data_binding.is_some());
+        assert_eq!(sdt.children.len(), 2);
+        assert!(matches!(&sdt.children[0], StructuredDataTagChild::Paragraph(_)));
+        assert!(matches!(&sdt.children[1], StructuredDataTagChild::Run(_)));
+    }
+
+    #[test]
+    fn test_sdt_xml_deserialize_nested() {
+        let xml = r#"<w:sdt xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+            <w:sdtPr />
+            <w:sdtContent>
+                <w:sdt>
+                    <w:sdtPr><w:alias w:val="Nested" /></w:sdtPr>
+                    <w:sdtContent>
+                        <w:p />
+                    </w:sdtContent>
+                </w:sdt>
+            </w:sdtContent>
+        </w:sdt>"#;
+
+        let sdt: StructuredDataTag = quick_xml::de::from_str(xml).unwrap();
+        assert_eq!(sdt.children.len(), 1);
+        if let StructuredDataTagChild::StructuredDataTag(nested) = &sdt.children[0] {
+            assert_eq!(nested.property.alias, Some("Nested".to_string()));
+            assert_eq!(nested.children.len(), 1);
+        } else {
+            panic!("Expected nested StructuredDataTag");
+        }
     }
 }

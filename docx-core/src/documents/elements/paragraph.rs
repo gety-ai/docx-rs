@@ -79,7 +79,7 @@ enum ParagraphChildXml {
     #[serde(rename = "hyperlink", alias = "w:hyperlink")]
     Hyperlink(Hyperlink),
     #[serde(rename = "sdt", alias = "w:sdt")]
-    StructuredDataTag(IgnoredAny),
+    StructuredDataTag(StructuredDataTag),
     #[serde(rename = "pPr", alias = "w:pPr")]
     ParagraphProperty(IgnoredAny), // Already handled separately
     #[serde(other)]
@@ -127,9 +127,10 @@ fn paragraph_child_from_xml(xml: ParagraphChildXml) -> Option<ParagraphChild> {
         ParagraphChildXml::Insert(insert) => Some(ParagraphChild::Insert(insert)),
         ParagraphChildXml::Delete(delete) => Some(ParagraphChild::Delete(delete)),
         ParagraphChildXml::Hyperlink(hyperlink) => Some(ParagraphChild::Hyperlink(hyperlink)),
-        ParagraphChildXml::StructuredDataTag(_)
-        | ParagraphChildXml::ParagraphProperty(_)
-        | ParagraphChildXml::Unknown => None,
+        ParagraphChildXml::StructuredDataTag(sdt) => {
+            Some(ParagraphChild::StructuredDataTag(Box::new(sdt)))
+        }
+        ParagraphChildXml::ParagraphProperty(_) | ParagraphChildXml::Unknown => None,
     }
 }
 
